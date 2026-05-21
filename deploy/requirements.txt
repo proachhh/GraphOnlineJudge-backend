@@ -22,8 +22,8 @@ raven==6.10.0
 XlsxWriter==3.1.9
 spark-ai-python==0.4.5
 neo4j-driver==5.28.1
-torch==2.6.0
-torchvision==0.21.0
-torchaudio==2.6.0
-torch-geometric==2.7.0
+# torch==2.6.0
+# torchvision==0.21.0
+# torchaudio==2.6.0
+# torch-geometric==2.7.0
 openai>=1.0.0
