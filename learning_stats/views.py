@@ -158,57 +158,60 @@ def learning_trend(request):
 def recommend(request):
     user = request.user
     username = user.username
+    user_id = user.id
     limit = int(request.GET.get('limit', 5))
     offset = int(request.GET.get('offset', 0))
 
-    logger.warning(f"=== 推荐请求：用户 {username}, limit={limit}, offset={offset} ===")
+    logger.warning(f"=== 多模态融合推荐请求：用户 {username}, limit={limit}, offset={offset} ===")
 
-    graph_recs = get_graph_recommendations(username, limit=50)
-    logger.warning(f"图谱召回结果数量: {len(graph_recs)}")
-
-    if len(graph_recs) < limit + offset:
-        logger.warning("图谱召回不足，使用热度兜底")
-        hot_recs = get_hot_recommendations(user, limit=50)
-        logger.warning(f"热度兜底结果数量: {len(hot_recs)}")
-        graph_recs.extend(hot_recs)
-    else:
-        logger.warning("图谱召回充足，不使用热度兜底")
-
+    fusion_recs = []
     seen_ids = set()
-    unique_recs = []
-    for rec in graph_recs:
-        pid = rec['id']
+
+    def add_rec(pid, reason, score, source):
         if pid not in seen_ids:
             seen_ids.add(pid)
-            unique_recs.append(rec)
+            fusion_recs.append({'id': pid, 'reason': reason, 'score': score, 'source': source})
 
-    # 新增根据模型排序
-    model, mappings = get_recommend_model()
-    if model is not None and mappings is not None:
-        user_id = request.user.id
-        user_inner_id = mappings['user2id'].get(user_id)
-        if user_inner_id is not None:
-            candidate_ids = []
-            candidate_inner_ids = []
-            for rec in unique_recs:
-                pid = rec['id']
-                inner_id = mappings['prob2id'].get(pid)
-                if inner_id is not None:
-                    candidate_ids.append(pid)
-                    candidate_inner_ids.append(inner_id)
-            if candidate_inner_ids:
-                import torch
-                user_tensor = torch.tensor([user_inner_id] * len(candidate_inner_ids), dtype=torch.long)
-                item_tensor = torch.tensor(candidate_inner_ids, dtype=torch.long)
-                with torch.no_grad():
-                    scores = model(user_tensor, item_tensor).numpy().flatten()
-                scored = list(zip(candidate_ids, scores))
-                scored.sort(key=lambda x: x[1], reverse=True)
-                rec_dict = {rec['id']: rec for rec in unique_recs}
-                unique_recs = [rec_dict[pid] for pid, _ in scored if pid in rec_dict]
+    graph_recs = get_graph_recommendations(username, limit=50)
+    logger.warning(f"  [规则图谱召回] {len(graph_recs)} 条")
+    for rec in graph_recs:
+        add_rec(rec['id'], rec['reason'], rec['score'], 'graph_rule')
 
-    paged_recs = unique_recs[offset:offset+limit]
-    total = len(unique_recs)
+    cf_recs = get_cf_recommendations(username, limit=30)
+    logger.warning(f"  [协同过滤召回] {len(cf_recs)} 条")
+    for rec in cf_recs:
+        add_rec(rec['id'], rec['reason'], rec['score'], 'graph_cf')
+
+    gnn_recs = get_gnn_recommendations(user_id, limit=30)
+    logger.warning(f"  [图神经网络召回] {len(gnn_recs)} 条")
+    for rec in gnn_recs:
+        add_rec(rec['id'], rec['reason'], rec['score'], 'gnn')
+
+    seq_recs = get_sequence_recommendations(user_id, limit=30)
+    logger.warning(f"  [序列行为召回] {len(seq_recs)} 条")
+    for rec in seq_recs:
+        add_rec(rec['id'], rec['reason'], rec['score'], 'sequence')
+
+    total_before_hot = len(fusion_recs)
+    if total_before_hot < limit + offset:
+        logger.warning("召回不足，使用热度兜底")
+        hot_recs = get_hot_recommendations(user, limit=50)
+        logger.warning(f"  [热度兜底] {len(hot_recs)} 条")
+        for rec in hot_recs:
+            add_rec(rec['id'], rec['reason'], rec.get('score', 30), 'hot')
+
+    logger.warning(f"  [去重后候选总数] {len(fusion_recs)} 条")
+
+    deepfm_ranked = apply_deepfm_rerank(user_id, fusion_recs)
+    if deepfm_ranked is not None:
+        fusion_recs = deepfm_ranked
+        logger.warning(f"  [DeepFM精排] 完成排序")
+    else:
+        fusion_recs.sort(key=lambda x: x['score'], reverse=True)
+        logger.warning(f"  [Fallback排序] 使用召回分数排序")
+
+    paged_recs = fusion_recs[offset:offset + limit]
+    total = len(fusion_recs)
 
     problem_ids = [rec['id'] for rec in paged_recs]
     problems_map = {
@@ -220,16 +223,18 @@ def recommend(request):
         problem = problems_map.get(rec['id'])
         if not problem:
             continue
+        source_tag = f" [{rec.get('source', '')}]" if rec.get('source') and rec['source'] != 'fusion' else ""
         data.append({
             '_id': problem._id,
             'title': problem.title,
             'difficulty': problem.difficulty,
             'tags': [tag.name for tag in problem.tags.all()],
-            'reason': rec['reason'],
+            'reason': rec['reason'] + source_tag,
+            'score': round(rec['score'], 4),
         })
 
     logger.warning(f"最终返回推荐数量: {len(data)}")
-    return JsonResponse({'recommendations': data, 'total': total})
+    return JsonResponse({'recommendations': data, 'total': total, 'total_before_hot': total_before_hot})
 
 def get_graph_recommendations(username, limit=20):
     client = neo4j_client
@@ -316,31 +321,7 @@ def get_graph_recommendations(username, limit=20):
     except Exception as e:
         logger.error(f"擅长知识点拓展查询失败: {e}")
 
-    # 4. 协同过滤召回（相似用户推荐）
-    cf_query = """
-    MATCH (u:User {username: $username})-[:SUBMITTED]->(s1:Submission)-[:FOR]->(p:Problem)
-    WHERE s1.result = '0'
-    WITH u, collect(DISTINCT p) AS u_ac
-    MATCH (other:User)-[:SUBMITTED]->(s2:Submission)-[:FOR]->(p)
-    WHERE s2.result = '0' AND other <> u AND p IN u_ac
-    WITH u, u_ac, other, count(DISTINCT p) AS common
-    WHERE common >= 2
-    ORDER BY common DESC
-    LIMIT 5
-    MATCH (other)-[:SUBMITTED]->(s3:Submission)-[:FOR]->(rec:Problem)
-    WHERE s3.result = '0' AND NOT rec IN u_ac
-    RETURN DISTINCT rec.problem_id AS id, rec._id AS display_id, rec.title AS title
-    ORDER BY rec.accepted_number DESC
-    LIMIT 10
-    """
-    try:
-        result = client.run_query(cf_query, {'username': username})
-        for r in result:
-            add_rec(r['id'], "与您学习路径相似的用户也做了此题", score=65)
-    except Exception as e:
-        logger.error(f"协同过滤查询失败: {e}")
-
-    # 5. 难度递进推荐（从用户已AC的题目难度出发推荐更高难度）
+    # 4. 难度递进推荐（从用户已AC的题目难度出发推荐更高难度）
     progression_query = """
     MATCH (u:User {username: $username})-[:SUBMITTED]->(s:Submission)-[:FOR]->(p:Problem)
     WHERE s.result = '0'
@@ -402,16 +383,29 @@ def learning_path(request):
     user = request.user
     username = user.username
     target_topic = request.GET.get('target_topic')
-    start_topic = request.GET.get('start_topic')  # 新增可选参数
+    start_topic = request.GET.get('start_topic')
+    method = request.GET.get('method', 'shortest')
 
     if not target_topic:
         return JsonResponse({'error': 'target_topic 参数缺失'}, status=400)
 
-    # 如果前端没有传起始知识点，则自动使用用户最薄弱的
     if not start_topic:
         start_topic = get_user_weakest_topic(username)
         if not start_topic:
             return JsonResponse({'error': '无足够数据判断薄弱知识点'}, status=404)
+
+    if method == 'rl':
+        rl_path = get_rl_learning_path(username, start_topic, target_topic)
+        if rl_path:
+            rl_enriched = enrich_path_with_problems(rl_path, username)
+            return JsonResponse({
+                'start_topic': start_topic,
+                'target_topic': target_topic,
+                'path': rl_enriched,
+                'method': 'rl',
+            })
+        else:
+            logger.warning(f"RL 路径规划失败，回退到最短路径")
 
     path_topics = get_shortest_path(start_topic, target_topic)
     if not path_topics:
@@ -420,10 +414,28 @@ def learning_path(request):
     enriched_path = enrich_path_with_problems(path_topics, username)
 
     return JsonResponse({
-        'start_topic': start_topic,  # 返回实际使用的起点
+        'start_topic': start_topic,
         'target_topic': target_topic,
-        'path': enriched_path
+        'path': enriched_path,
+        'method': 'shortest',
     })
+
+def get_rl_learning_path(username, start_topic, target_topic):
+    try:
+        import os
+        from django.conf import settings
+        model_dir = os.path.join(str(settings.BASE_DIR), 'recommend_models')
+        from recommend.rl_planner import load_dqn_planner, rl_plan_path
+        policy_net, env_data = load_dqn_planner(model_dir)
+        if policy_net is None:
+            return None
+        path = rl_plan_path(username, target_topic, policy_net, env_data, max_steps=10)
+        if not path:
+            return None
+        return [step['topic'] for step in path]
+    except Exception as e:
+        logger.warning(f"RL 路径规划失败: {e}")
+        return None
 
 def get_user_weakest_topic(username):
     """返回用户错误率最高的知识点名称"""
@@ -499,12 +511,117 @@ def knowledge_graph_overview(request):
 
     return JsonResponse({'nodes': nodes, 'edges': edges})
 
+_fusion_engine = None
+
+
+def get_fusion_engine():
+    global _fusion_engine
+    if _fusion_engine is not None:
+        return _fusion_engine
+    try:
+        import os
+        from django.conf import settings
+        model_dir = os.path.join(str(settings.BASE_DIR), 'recommend_models')
+        from recommend.multi_modal_fusion import MultiModalFusionEngine
+        _fusion_engine = MultiModalFusionEngine(model_dir)
+        logger.info("多模态融合引擎初始化成功")
+    except Exception as e:
+        logger.warning(f"多模态融合引擎初始化失败: {e}")
+    return _fusion_engine
+
+
+def get_cf_recommendations(username, limit=30):
+    client = neo4j_client
+    recs = []
+    seen_ids = set()
+
+    cf_query = """
+    MATCH (u:User {username: $username})-[:SUBMITTED]->(s1:Submission)-[:FOR]->(p:Problem)
+    WHERE s1.result = '0'
+    WITH u, collect(DISTINCT p) AS u_ac
+    MATCH (other:User)-[:SUBMITTED]->(s2:Submission)-[:FOR]->(p)
+    WHERE s2.result = '0' AND other <> u AND p IN u_ac
+    WITH u, u_ac, other, count(DISTINCT p) AS common
+    WHERE common >= 2
+    ORDER BY common DESC
+    LIMIT 5
+    MATCH (other)-[:SUBMITTED]->(s3:Submission)-[:FOR]->(rec:Problem)
+    WHERE s3.result = '0' AND NOT rec IN u_ac
+    RETURN DISTINCT rec.problem_id AS id, rec._id AS display_id, rec.title AS title
+    ORDER BY rec.accepted_number DESC
+    LIMIT $limit
+    """
+    try:
+        result = client.run_query(cf_query, {'username': username, 'limit': limit})
+        for r in result:
+            pid = r['id']
+            if pid not in seen_ids:
+                seen_ids.add(pid)
+                recs.append({'id': pid, 'reason': "与您学习路径相似的用户也做了此题", 'score': 65})
+    except Exception as e:
+        logger.error(f"协同过滤查询失败: {e}")
+
+    return recs
+
+
+def get_gnn_recommendations(user_id, limit=30):
+    try:
+        engine = get_fusion_engine()
+        if engine is None or engine.gnn_embeddings is None:
+            return []
+        from recommend.gnn_recall import gnn_recall
+        results = gnn_recall(user_id, engine.gnn_embeddings, engine.gnn_graph_data, top_k=limit)
+        return [
+            {'id': pid, 'reason': "基于知识图谱图神经网络推荐", 'score': max(score * 100, 55)}
+            for pid, score in results
+        ]
+    except Exception as e:
+        logger.warning(f"GNN召回失败: {e}")
+        return []
+
+
+def get_sequence_recommendations(user_id, limit=30):
+    try:
+        engine = get_fusion_engine()
+        if engine is None or engine.sequence_model is None:
+            return []
+        from recommend.sequence_recall import sequence_recall
+        results = sequence_recall(user_id, engine.sequence_model, engine.sequence_data, top_k=limit)
+        return [
+            {'id': pid, 'reason': "基于您的做题序列智能推荐", 'score': max(score * 100, 55)}
+            for pid, score in results
+        ]
+    except Exception as e:
+        logger.warning(f"序列召回失败: {e}")
+        return []
+
+
+def apply_deepfm_rerank(user_id, candidates):
+    try:
+        engine = get_fusion_engine()
+        if engine is None or engine.ranking_model is None:
+            return None
+
+        from recommend.deepfm_ranking import deepfm_rank
+        candidate_ids = [c['id'] for c in candidates]
+        ranked = deepfm_rank(user_id, candidate_ids, engine.ranking_model, engine.ranking_data)
+
+        scored_map = dict(ranked)
+        for c in candidates:
+            c['score'] = scored_map.get(c['id'], c['score'])
+
+        candidates.sort(key=lambda x: x['score'], reverse=True)
+        return candidates
+    except Exception as e:
+        logger.warning(f"DeepFM重排失败，使用召回分数: {e}")
+        return None
+
+
 def get_recommend_model():
     global _recommend_model, _recommend_mappings
     if _recommend_model is not None:
         return _recommend_model, _recommend_mappings
     try:
-        # 延迟导入，只有在模型真正需要时才尝试加载
         import torch
         import pickle
         from recommend.model import SimpleRecommender

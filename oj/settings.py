@@ -55,6 +55,7 @@ LOCAL_APPS = [
     'options',
     'judge',
     'aiChat',
+    'agents',
     'learning_stats',
     'knowledge_graph',
     'lesson_plan',

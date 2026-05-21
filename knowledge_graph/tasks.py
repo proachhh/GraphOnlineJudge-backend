@@ -118,6 +118,106 @@ def discover_topic_correlations(min_cooccurrence=10, min_confidence=0.3):
 
 
 @dramatiq.actor(max_retries=3)
+def apply_rgcn_prerequisites(confidence_threshold=0.7):
+    """使用 RGCN 深度学习推理发现缺失的 PREREQUISITE_OF 关系，写入 Neo4j"""
+    import os
+    from django.conf import settings
+
+    model_dir = os.path.join(str(settings.BASE_DIR), 'recommend_models')
+    model_path = os.path.join(model_dir, 'rgcn.pt')
+
+    if not os.path.exists(model_path):
+        logger.info("RGCN 模型未训练，跳过深度学习推理")
+        return
+
+    try:
+        from knowledge_graph.rgcn import RGCNTrainer
+        trainer = RGCNTrainer(save_dir=model_dir)
+        predictions = trainer.predict_prerequisites(
+            confidence_threshold=confidence_threshold, top_k_per_node=5
+        )
+
+        client = neo4j_client
+        added = 0
+        for pred in predictions:
+            try:
+                result = client.run_query(
+                    """
+                    MATCH (t1:Topic {name: $source}), (t2:Topic {name: $target})
+                    WHERE NOT EXISTS((t1)-[:PREREQUISITE_OF]->(t2))
+                    MERGE (t1)-[r:PREREQUISITE_OF]->(t2)
+                    SET r.source = 'rgcn',
+                        r.confidence = $confidence,
+                        r.created_at = datetime()
+                    RETURN count(r) AS cnt
+                    """,
+                    {
+                        'source': pred['source'],
+                        'target': pred['target'],
+                        'confidence': pred['confidence'],
+                    }
+                )
+                if result and result[0].get('cnt', 0) > 0:
+                    added += 1
+            except Exception as e:
+                logger.warning(f"写入 PREREQUISITE_OF 边失败 ({pred['source']}→{pred['target']}): {e}")
+
+        logger.info(f"RGCN 推理完成: 新增 {added} 条 PREREQUISITE_OF 关系")
+    except Exception as e:
+        logger.exception(f"RGCN 推理失败: {e}")
+        raise
+
+
+@dramatiq.actor(max_retries=3)
+def apply_transe_link_prediction(top_k=15):
+    """使用 TransE 嵌入发现缺失的关系并写入 Neo4j"""
+    import os
+    from django.conf import settings
+
+    model_dir = os.path.join(str(settings.BASE_DIR), 'recommend_models')
+    model_path = os.path.join(model_dir, 'transe.pt')
+
+    if not os.path.exists(model_path):
+        logger.info("TransE 模型未训练，跳过链接预测")
+        return
+
+    try:
+        from knowledge_graph.kg_embedding import TransETrainer
+        trainer = TransETrainer(save_dir=model_dir)
+        missing = trainer.discover_missing_links(top_k=top_k)
+
+        client = neo4j_client
+        added = 0
+        for item in missing:
+            try:
+                result = client.run_query(
+                    """
+                    MATCH (t1:Topic {name: $source}), (t2:Topic {name: $target})
+                    WHERE NOT EXISTS((t1)-[:PREREQUISITE_OF]->(t2))
+                    MERGE (t1)-[r:PREREQUISITE_OF]->(t2)
+                    SET r.source = 'transe',
+                        r.confidence = $score,
+                        r.created_at = datetime()
+                    RETURN count(r) AS cnt
+                    """,
+                    {
+                        'source': item['source'],
+                        'target': item['target'],
+                        'score': item['score'],
+                    }
+                )
+                if result and result[0].get('cnt', 0) > 0:
+                    added += 1
+            except Exception as e:
+                logger.warning(f"TransE 写入边失败 ({item['source']}→{item['target']}): {e}")
+
+        logger.info(f"TransE 链接预测完成: 新增 {added} 条 PREREQUISITE_OF 关系")
+    except Exception as e:
+        logger.exception(f"TransE 链接预测失败: {e}")
+        raise
+
+
+@dramatiq.actor(max_retries=3)
 def update_user_mastery(user_id):
     """更新用户对各个知识点的掌握程度"""
     from submission.models import Submission
@@ -172,7 +272,7 @@ def update_user_mastery(user_id):
 
 @dramatiq.actor(max_retries=3)
 def run_full_graph_learning():
-    """运行完整的知识图谱自学习流程"""
+    """运行完整的知识图谱自学习流程（包含深度学习推理）"""
     logger.info("Starting full graph learning process...")
 
     try:
@@ -183,7 +283,13 @@ def run_full_graph_learning():
         logger.info("Problem difficulty updated")
 
         discover_topic_correlations.send()
-        logger.info("Topic correlations discovered")
+        logger.info("Topic correlations discovered (statistical)")
+
+        apply_rgcn_prerequisites.send()
+        logger.info("RGCN prerequisite inference dispatched")
+
+        apply_transe_link_prediction.send()
+        logger.info("TransE link prediction dispatched")
 
         logger.info("Full graph learning process completed")
     except Exception as e:
