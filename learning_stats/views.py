@@ -236,6 +236,84 @@ def recommend(request):
     logger.warning(f"最终返回推荐数量: {len(data)}")
     return JsonResponse({'recommendations': data, 'total': total, 'total_before_hot': total_before_hot})
 
+@login_required
+def immersion_recommendations(request):
+    user = request.user
+    username = user.username
+    user_id = user.id
+    limit = int(request.GET.get('limit', 10))
+    offset = int(request.GET.get('offset', 0))
+
+    seen_ids = set()
+    recs = []
+
+    def add_rec(pid, reason, score, source):
+        if pid not in seen_ids:
+            seen_ids.add(pid)
+            recs.append({'id': pid, 'reason': reason, 'score': score, 'source': source})
+
+    graph_recs = get_graph_recommendations(username, limit=30)
+    for rec in graph_recs:
+        add_rec(rec['id'], rec['reason'], rec['score'], 'graph_rule')
+
+    cf_recs = get_cf_recommendations(username, limit=20)
+    for rec in cf_recs:
+        add_rec(rec['id'], rec['reason'], rec['score'], 'graph_cf')
+
+    gnn_recs = get_gnn_recommendations(user_id, limit=20)
+    for rec in gnn_recs:
+        add_rec(rec['id'], rec['reason'], rec['score'], 'gnn')
+
+    seq_recs = get_sequence_recommendations(user_id, limit=20)
+    for rec in seq_recs:
+        add_rec(rec['id'], rec['reason'], rec['score'], 'sequence')
+
+    if len(recs) < limit:
+        hot_recs = get_hot_recommendations(user, limit=30)
+        for rec in hot_recs:
+            add_rec(rec['id'], rec['reason'], rec.get('score', 30), 'hot')
+
+    recs.sort(key=lambda x: x['score'], reverse=True)
+
+    current_idx = offset
+    problem_ids = [rec['id'] for rec in recs]
+
+    problems_map = {
+        p.id: p for p in Problem.objects.filter(
+            id__in=problem_ids
+        ).prefetch_related('tags').select_related('created_by')
+    }
+
+    data = []
+    for rec in recs:
+        problem = problems_map.get(rec['id'])
+        if not problem:
+            continue
+        data.append({
+            '_id': problem._id,
+            'id': rec['id'],
+            'title': problem.title,
+            'difficulty': problem.difficulty,
+            'tags': [tag.name for tag in problem.tags.all()],
+            'description': problem.description,
+            'input_description': problem.input_description,
+            'output_description': problem.output_description,
+            'samples': problem.samples,
+            'time_limit': problem.time_limit,
+            'memory_limit': problem.memory_limit,
+            'accepted_number': problem.accepted_number,
+            'submission_number': problem.submission_number,
+            'reason': rec['reason'],
+            'score': round(rec['score'], 4),
+            'source': rec.get('source', ''),
+        })
+
+    return JsonResponse({
+        'problems': data,
+        'total': len(data),
+        'current_index': current_idx,
+    })
+
 def get_graph_recommendations(username, limit=20):
     client = neo4j_client
     recs = []
@@ -258,7 +336,7 @@ def get_graph_recommendations(username, limit=20):
     RETURN DISTINCT rec.problem_id AS id, rec._id AS display_id, rec.title AS title,
            t.name AS mastered_topic, next_topic.name AS next_topic,
            rec.accepted_number AS ac_num
-    ORDER BY rec.accepted_number DESC
+    ORDER BY ac_num DESC
     LIMIT 10
     """
     try:
@@ -274,7 +352,7 @@ def get_graph_recommendations(username, limit=20):
     WITH u, t, count(s) AS total,
          sum(CASE WHEN s.result = '0' THEN 1 ELSE 0 END) AS ac_count
     WHERE total >= 3
-    WITH t, total, ac_count, (total - ac_count) * 1.0 / total AS error_rate
+    WITH u, t, total, ac_count, (total - ac_count) * 1.0 / total AS error_rate
     WHERE error_rate > 0.3
     ORDER BY error_rate DESC, total DESC
     LIMIT 3
@@ -286,7 +364,7 @@ def get_graph_recommendations(username, limit=20):
     RETURN DISTINCT rec.problem_id AS id, rec._id AS display_id, rec.title AS title,
            t.name AS weak_topic, rec.difficulty AS difficulty,
            rec.accepted_number AS ac_num
-    ORDER BY rec.accepted_number DESC
+    ORDER BY ac_num DESC
     LIMIT 10
     """
     try:
@@ -310,8 +388,9 @@ def get_graph_recommendations(username, limit=20):
     WHERE rec.difficulty IN difficulties
     AND NOT EXISTS { MATCH (u)-[:SUBMITTED]->(:Submission)-[:FOR]->(rec) }
     RETURN DISTINCT rec.problem_id AS id, rec._id AS display_id, rec.title AS title,
-           t.name AS strength_topic, rec.difficulty AS difficulty
-    ORDER BY rec.accepted_number DESC
+           t.name AS strength_topic, rec.difficulty AS difficulty,
+           rec.accepted_number AS ac_num
+    ORDER BY ac_num DESC
     LIMIT 10
     """
     try:
@@ -337,8 +416,8 @@ def get_graph_recommendations(username, limit=20):
         (max_diff = 'Mid' AND rec.difficulty IN ['Mid', 'High'])
     )
     RETURN rec.problem_id AS id, rec._id AS display_id, rec.title AS title,
-           rec.difficulty AS difficulty
-    ORDER BY rec.accepted_number DESC
+           rec.difficulty AS difficulty, rec.accepted_number AS ac_num
+    ORDER BY ac_num DESC
     LIMIT 10
     """
     try:
@@ -547,8 +626,9 @@ def get_cf_recommendations(username, limit=30):
     LIMIT 5
     MATCH (other)-[:SUBMITTED]->(s3:Submission)-[:FOR]->(rec:Problem)
     WHERE s3.result = '0' AND NOT rec IN u_ac
-    RETURN DISTINCT rec.problem_id AS id, rec._id AS display_id, rec.title AS title
-    ORDER BY rec.accepted_number DESC
+    RETURN DISTINCT rec.problem_id AS id, rec._id AS display_id, rec.title AS title,
+           rec.accepted_number AS ac_num
+    ORDER BY ac_num DESC
     LIMIT $limit
     """
     try:
