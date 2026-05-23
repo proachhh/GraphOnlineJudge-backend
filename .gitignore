@@ -74,6 +74,8 @@ data/public/avatar/*
 data/config/*
 !data/config/.gitkeep
 
+data/chromadb/*
+
 http_locations.conf
 https_locations.conf
 

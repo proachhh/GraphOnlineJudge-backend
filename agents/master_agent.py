@@ -3,6 +3,8 @@ from typing import Dict, Any, List
 
 from agents.base_agent import BaseAgent
 from agents.profile_agent import ProfileAgent
+from agents.resource_agent import ResourceAgent
+from agents.path_planning_agent import PathPlanningAgent
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +19,10 @@ INTENT_KEYWORDS = {
                       '运行错误', '编译错误', '超时', '为什么没过', '错在哪'],
     'learning_path': ['学习路径', '学习路线', '怎么学', '学习计划', '进阶路线',
                       '先学什么', '规划', '路径', '路线图'],
+    'resource': ['生成资料', '讲解', '出题', '思维导图', '阅读材料', '代码案例',
+                 '生成讲稿', '整理笔记', '画图', '导图', '生成题目',
+                 '出几道题', '课程文档', '代码实操', '练习', '讲义', '资料',
+                 '选择题', '填空题', '判断题', '简答题', '题目', '拓展阅读', '阅读'],
     'general': [],
 }
 
@@ -25,14 +31,26 @@ class MasterAgent:
     def __init__(self):
         self._name = 'MasterAgent'
         self._agents: Dict[str, BaseAgent] = {}
+        self._profile_agent = None
         self._register_default_agents()
 
     def _register_default_agents(self):
         try:
-            self.register(ProfileAgent())
+            self._profile_agent = ProfileAgent()
+            self.register(self._profile_agent)
             logger.info("ProfileAgent registered")
         except Exception as e:
             logger.warning(f"Failed to register ProfileAgent: {e}")
+        try:
+            self.register(ResourceAgent())
+            logger.info("ResourceAgent registered")
+        except Exception as e:
+            logger.warning(f"Failed to register ResourceAgent: {e}")
+        try:
+            self.register(PathPlanningAgent())
+            logger.info("PathPlanningAgent registered")
+        except Exception as e:
+            logger.warning(f"Failed to register PathPlanningAgent: {e}")
 
     @property
     def name(self) -> str:
@@ -64,7 +82,42 @@ class MasterAgent:
                 best_intent = intent
         return best_intent
 
-    def handle_message(self, user_id: int, message: str) -> Dict[str, Any]:
+    def load_user_profile(self, user_id: int) -> Dict[str, Any]:
+        if self._profile_agent is None:
+            return {}
+        try:
+            return self._profile_agent._load_profile_from_neo4j(user_id)
+        except Exception as e:
+            logger.warning(f"Failed to load user profile for {user_id}: {e}")
+            return {}
+
+    def get_clean_user_profile(self, user_id: int) -> Dict[str, Any]:
+        if self._profile_agent is None:
+            return {}
+        try:
+            return self._profile_agent.get_clean_profile(user_id)
+        except Exception as e:
+            logger.warning(f"Failed to get clean profile for {user_id}: {e}")
+            return {}
+
+    def handle_message(self, user_id: int, message: str,
+                        extra_context: Dict[str, Any] = None) -> Dict[str, Any]:
+        user_profile = self.load_user_profile(user_id)
+
+        if user_profile and not user_profile.get('_onboarding_complete', True):
+            agent = self._agents.get('ProfileAgent')
+            if agent:
+                result = agent.process_onboarding_answer(user_id, message)
+                return {
+                    'agent': 'ProfileAgent',
+                    'intent': 'profile_onboarding',
+                    'onboarding_complete': result.get('onboarding_complete', False),
+                    'question': result.get('question'),
+                    'message': result.get('message'),
+                    'step': result.get('step'),
+                    'total_steps': result.get('total_steps'),
+                }
+
         intent = self.classify_intent(message)
         logger.info(f"MasterAgent: user_id={user_id}, intent={intent}, message='{message[:80]}...'")
 
@@ -72,7 +125,10 @@ class MasterAgent:
             'user_id': user_id,
             'message': message,
             'intent': intent,
+            'existing_profile': user_profile,
         }
+        if extra_context:
+            context.update(extra_context)
 
         if intent == 'profile':
             agent = self._agents.get('ProfileAgent')
@@ -82,15 +138,78 @@ class MasterAgent:
                 result['intent'] = intent
                 return result
 
+        if intent == 'resource':
+            agent = self._agents.get('ResourceAgent')
+            if agent:
+                resource_type = self._classify_resource_type(message)
+                context['resource_type'] = resource_type
+                result = agent.run(context)
+                result['agent'] = 'ResourceAgent'
+                result['intent'] = intent
+                return result
+
+        if intent == 'learning_path':
+            agent = self._agents.get('PathPlanningAgent')
+            if agent:
+                result = agent.run(context)
+                result['agent'] = 'PathPlanningAgent'
+                result['intent'] = intent
+                return result
+
+        if intent in ('recommend', 'hint', 'analyze_error'):
+            result = {
+                'agent': 'MasterAgent',
+                'intent': intent,
+                'message': f'意图识别: {intent}。该功能即将上线。',
+            }
+            if user_profile.get('_onboarding_complete'):
+                result['user_profile'] = {
+                    'strength_topics': user_profile.get('strength_topics', []),
+                    'weak_topics': user_profile.get('weak_topics', []),
+                    'recommended_focus': user_profile.get('recommended_focus', ''),
+                }
+            return result
+
         return {
             'agent': 'MasterAgent',
             'intent': intent,
             'message': f'意图识别: {intent}。该功能即将上线。',
         }
 
+    def handle_submission_event(self, user_id: int,
+                                  event: Dict[str, Any]) -> Dict[str, Any]:
+        if self._profile_agent is None:
+            return {'success': False, 'error': 'ProfileAgent not available'}
+
+        profile = self.load_user_profile(user_id)
+        context = {
+            'user_id': user_id,
+            'existing_profile': profile,
+            'submission_event': event,
+            'intent': 'profile',
+            'message': '',
+        }
+        return self._profile_agent.run(context)
+
+    def _classify_resource_type(self, message: str) -> str:
+        m = message.lower()
+        if any(kw in m for kw in ['思维导图', '导图', '画图', '脑图', 'mindmap', 'mermaid']):
+            return 'mindmap'
+        if any(kw in m for kw in ['出题', '题目', '生成题目', '出几道题', '练习', '选择题', '填空题', '判断题']):
+            return 'exercise'
+        if any(kw in m for kw in ['阅读', '材料', '资料', '推荐', '书单', '清单']):
+            return 'reading'
+        if any(kw in m for kw in ['代码', '案例', '实操', '示例', 'code', '编程', '实现']):
+            return 'code_example'
+        return 'lecture'
+
     @property
     def agents(self) -> Dict[str, BaseAgent]:
         return dict(self._agents)
+
+    @property
+    def profile_agent(self):
+        return self._profile_agent
 
 
 master_agent = MasterAgent()
