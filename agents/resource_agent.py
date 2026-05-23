@@ -194,7 +194,35 @@ mindmap
 ## 逐步讲解
 ## 运行示例
 ## 变体练习
-"""
+""",
+
+    'coding_problem': """你是一个编程题目的生成助手。请根据用户给出的提示，生成一道完整的编程题目，并以 JSON 格式返回。
+JSON 必须包含以下字段：
+- title: 题目标题（字符串）
+- description: 题目描述（支持 HTML 格式，可以用 <p> 等标签）
+- input_description: 输入说明（HTML 格式）
+- output_description: 输出说明（HTML 格式）
+- hint: 提示（可选，HTML 格式，如果不需要可留空）
+- samples: 样例列表，每个样例是一个对象，包含 input 和 output 字段
+- tags: 标签列表，例如 ["动态规划", "字符串"]
+- difficulty: 难度，只能是 "High"、"Mid"、"Low" 之一
+- source: 题目来源（可选）
+- time_limit: 时间限制（整数，单位毫秒，建议 1000~3000）
+- memory_limit: 内存限制（整数，单位 MB，建议 128~512）
+
+请只返回 JSON，不要包含其他说明文字。
+
+# 知识点信息
+目标知识点: {topic}
+难度: {difficulty}
+
+# 参考资料 (RAG检索结果)
+{rag_context}
+
+# 用户要求
+{message}
+
+生成一道题目。"""
 }
 
 
@@ -227,6 +255,8 @@ class ResourceAgent(BaseAgent):
                 return self._generate_reading(topic, rag_context, kg_context)
             elif resource_type == 'code_example':
                 return self._generate_code_example(topic, rag_context)
+            elif resource_type == 'coding_problem':
+                return self._generate_coding_problem(topic, difficulty, rag_context, user_message)
             else:
                 return {
                     'success': False,
@@ -492,3 +522,36 @@ class ResourceAgent(BaseAgent):
         except (json.JSONDecodeError, ValueError, IndexError) as e:
             logger.warning(f"JSON parse failed: {e}")
             return None
+
+    def _generate_coding_problem(self, topic: str, difficulty: str, rag_context: str, user_message: str) -> Dict[str, Any]:
+        prompt = RESOURCE_PROMPTS['coding_problem'].format(
+            rag_context=rag_context,
+            topic=topic,
+            difficulty=difficulty,
+            message=user_message,
+        )
+        response = self._call_ai(prompt)
+
+        data = self._parse_json_response(response)
+        if not data:
+            return {
+                'success': False,
+                'error': 'AI 返回数据格式错误，无法生成编程题目',
+                'resource_type': 'coding_problem',
+            }
+
+        data.setdefault('hint', '')
+        data.setdefault('source', '')
+        data.setdefault('time_limit', 1000)
+        data.setdefault('memory_limit', 256)
+
+        return {
+            'success': True,
+            'agent': 'ResourceAgent',
+            'resource_type': 'coding_problem',
+            'intent': 'resource',
+            'topic': topic,
+            'difficulty': difficulty,
+            'content': data,
+            'display_type': 'coding_problem',
+        }

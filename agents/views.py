@@ -110,3 +110,96 @@ def profile_init(request):
             'success': False,
             'error': str(e),
         }, status=500)
+
+
+@login_required
+def agent_recommend(request):
+    user_id = request.user.id
+    limit = int(request.GET.get('limit', 5))
+    offset = int(request.GET.get('offset', 0))
+
+    agent = master_agent.agents.get('RecommendAgent')
+    if agent is None:
+        return JsonResponse({'error': 'RecommendAgent 未就绪'}, status=500)
+
+    try:
+        context = {
+            'user_id': user_id,
+            'message': '推荐题目',
+            'limit': limit,
+            'offset': offset,
+            'existing_profile': master_agent.load_user_profile(user_id),
+        }
+        result = agent.run(context)
+        if result.get('success'):
+            return JsonResponse({
+                'recommendations': result.get('recommendations', []),
+                'total': result.get('total', 0),
+            })
+        else:
+            return JsonResponse({'error': result.get('error', '推荐失败')}, status=500)
+    except Exception as e:
+        logger.exception(f"RecommendAgent failed")
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@login_required
+def agent_immersion(request):
+    user_id = request.user.id
+    limit = int(request.GET.get('limit', 10))
+    offset = int(request.GET.get('offset', 0))
+
+    agent = master_agent.agents.get('RecommendAgent')
+    if agent is None:
+        return JsonResponse({'error': 'RecommendAgent 未就绪'}, status=500)
+
+    try:
+        context = {
+            'user_id': user_id,
+            'message': '沉浸式刷题',
+            'limit': limit,
+            'offset': offset,
+            'existing_profile': master_agent.load_user_profile(user_id),
+        }
+        result = agent.run(context)
+        if result.get('success'):
+            return JsonResponse({
+                'problems': result.get('recommendations', []),
+                'total': len(result.get('recommendations', [])),
+                'current_index': offset,
+            })
+        else:
+            return JsonResponse({'error': result.get('error', '推荐失败')}, status=500)
+    except Exception as e:
+        logger.exception(f"Immersion recommend failed")
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@login_required
+def agent_learning_path(request):
+    user_id = request.user.id
+    start_topic = request.GET.get('start_topic', '')
+    target_topic = request.GET.get('target_topic', '')
+
+    agent = master_agent.agents.get('PathPlanningAgent')
+    if agent is None:
+        return JsonResponse({'error': 'PathPlanningAgent 未就绪'}, status=500)
+
+    try:
+        context = {
+            'user_id': user_id,
+            'message': '规划学习路径',
+            'existing_profile': master_agent.load_user_profile(user_id),
+        }
+        if start_topic:
+            context['start_topic'] = start_topic
+        if target_topic:
+            context['target_topic'] = target_topic
+        result = agent.run(context)
+        if result.get('success'):
+            return JsonResponse(result)
+        else:
+            return JsonResponse({'error': result.get('error', '路径规划失败')}, status=500)
+    except Exception as e:
+        logger.exception(f"PathPlanningAgent failed")
+        return JsonResponse({'error': str(e)}, status=500)

@@ -413,10 +413,17 @@ class ProfileAgent(BaseAgent):
                     except json.JSONDecodeError:
                         onboarding_answers = {}
 
+                strengths = r.get('strengths') or []
+                weaks = r.get('weaks') or []
+                if isinstance(strengths, str):
+                    strengths = [strengths]
+                if isinstance(weaks, str):
+                    weaks = [weaks]
+
                 return {
                     'knowledge_mastery': r.get('mastery', ''),
-                    'strength_topics': r.get('strengths') or [],
-                    'weak_topics': r.get('weaks') or [],
+                    'strength_topics': strengths if isinstance(strengths, list) else [],
+                    'weak_topics': weaks if isinstance(weaks, list) else [],
                     'coding_style': r.get('style', ''),
                     'learning_pace': r.get('pace', ''),
                     'recommended_focus': r.get('focus', ''),

@@ -3,7 +3,7 @@ from django.urls import path
 from django.conf import settings
 from django.views.static import serve
 
-from learning_stats.views import learning_stats, recommend, learning_trend, learning_path, knowledge_graph_overview, immersion_recommendations
+from learning_stats.views import learning_stats, learning_trend, knowledge_graph_overview
 
 from django.conf import settings
 from django.conf.urls.static import static
@@ -26,11 +26,8 @@ urlpatterns = [
     path('api/spark/', include('aiChat.urls')),
     path('api/agent/', include('agents.urls')),
     path('api/learning-stats/', learning_stats, name='learning_stats'),
-    path('api/recommend/', recommend, name='recommend'),
     path('api/learning-trend/', learning_trend, name='learning-trend'),
-    path('api/learning-path/', learning_path, name='learning_path'),
     path('api/knowledge-graph/', knowledge_graph_overview, name='knowledge_graph_overview'),
-    path('api/immersion/recommendations/', immersion_recommendations, name='immersion_recommendations'),
     url(r"^api/", include("lesson_plan.urls.oj")),
     url(r"^api/admin/", include("lesson_plan.urls.admin")),
     url(r"^api/admin/", include("dashboard.urls")),

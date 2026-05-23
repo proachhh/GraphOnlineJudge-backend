@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 def train_all(models='all', epochs_gnn=60, epochs_seq=30, epochs_rank=30,
-              epochs_transe=150, epochs_rgcn=100, epochs_dqn=1000):
+              epochs_transe=150, epochs_rgcn=100):
     model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'recommend_models')
     os.makedirs(model_dir, exist_ok=True)
 
@@ -97,18 +97,6 @@ def train_all(models='all', epochs_gnn=60, epochs_seq=30, epochs_rank=30,
             logger.info("RGCN 推理模型训练完成!")
         except Exception as e:
             logger.error(f"RGCN 训练失败: {e}", exc_info=True)
-
-    if models in ('all', 'dqn'):
-        logger.info("=" * 60)
-        logger.info("开始训练: DQN 强化学习路径规划")
-        logger.info("=" * 60)
-        try:
-            from recommend.rl_planner import DQNTrainer
-            trainer = DQNTrainer(save_dir=model_dir)
-            trainer.train(episodes=epochs_dqn, max_steps=10, batch_size=64, lr=0.001)
-            logger.info("DQN 路径规划模型训练完成!")
-        except Exception as e:
-            logger.error(f"DQN 训练失败: {e}", exc_info=True)
 
     logger.info("=" * 60)
     logger.info("所有模型训练完成!")

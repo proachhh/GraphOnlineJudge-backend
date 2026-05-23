@@ -5,6 +5,9 @@ from agents.base_agent import BaseAgent
 from agents.profile_agent import ProfileAgent
 from agents.resource_agent import ResourceAgent
 from agents.path_planning_agent import PathPlanningAgent
+from agents.recommend_agent import RecommendAgent
+from agents.hint_agent import HintAgent
+from agents.error_analysis_agent import ErrorAnalysisAgent
 
 logger = logging.getLogger(__name__)
 
@@ -12,17 +15,19 @@ INTENT_KEYWORDS = {
     'profile': ['画像', '分析我的学习', '我的水平', '我学得怎么样', '学习报告', '我的能力',
                 '我的强项', '我的弱项', '知识掌握', '学习评估', '当前能力', '我的学习情况'],
     'recommend': ['推荐', '下一题', '做题建议', '刷题', '学什么', '推荐题目',
-                  '有什么题目', '什么题适合我'],
+                  '有什么题目', '什么题适合我', '帮我推荐', '介绍几道', '来几道'],
     'hint': ['提示', '怎么做', '思路', '解题方向', '帮我理解', '这道题', '参考答案',
              '解答', '不会做', '教教我'],
     'analyze_error': ['为什么错了', '哪里错了', '错误分析', '帮我看看', '提交失败',
-                      '运行错误', '编译错误', '超时', '为什么没过', '错在哪'],
+                      '运行错误', '编译错误', '超时', '为什么没过', '错在哪',
+                      '提交错了', '哪里不对', '报错了'],
     'learning_path': ['学习路径', '学习路线', '怎么学', '学习计划', '进阶路线',
-                      '先学什么', '规划', '路径', '路线图'],
+                      '先学什么', '路线图'],
     'resource': ['生成资料', '讲解', '出题', '思维导图', '阅读材料', '代码案例',
                  '生成讲稿', '整理笔记', '画图', '导图', '生成题目',
                  '出几道题', '课程文档', '代码实操', '练习', '讲义', '资料',
-                 '选择题', '填空题', '判断题', '简答题', '题目', '拓展阅读', '阅读'],
+                 '选择题', '填空题', '判断题', '简答题', '题目', '拓展阅读', '阅读',
+                 '编程题', '生成编程', '算法题'],
     'general': [],
 }
 
@@ -35,22 +40,25 @@ class MasterAgent:
         self._register_default_agents()
 
     def _register_default_agents(self):
-        try:
-            self._profile_agent = ProfileAgent()
-            self.register(self._profile_agent)
-            logger.info("ProfileAgent registered")
-        except Exception as e:
-            logger.warning(f"Failed to register ProfileAgent: {e}")
-        try:
-            self.register(ResourceAgent())
-            logger.info("ResourceAgent registered")
-        except Exception as e:
-            logger.warning(f"Failed to register ResourceAgent: {e}")
-        try:
-            self.register(PathPlanningAgent())
-            logger.info("PathPlanningAgent registered")
-        except Exception as e:
-            logger.warning(f"Failed to register PathPlanningAgent: {e}")
+        agent_classes = [
+            ('ProfileAgent', ProfileAgent),
+            ('ResourceAgent', ResourceAgent),
+            ('PathPlanningAgent', PathPlanningAgent),
+            ('RecommendAgent', RecommendAgent),
+            ('HintAgent', HintAgent),
+            ('ErrorAnalysisAgent', ErrorAnalysisAgent),
+        ]
+
+        for agent_name, agent_cls in agent_classes:
+            try:
+                if agent_name == 'ProfileAgent':
+                    self._profile_agent = agent_cls()
+                    self.register(self._profile_agent)
+                else:
+                    self.register(agent_cls())
+                logger.info(f"{agent_name} registered")
+            except Exception as e:
+                logger.warning(f"Failed to register {agent_name}: {e}")
 
     @property
     def name(self) -> str:
@@ -148,6 +156,30 @@ class MasterAgent:
                 result['intent'] = intent
                 return result
 
+        if intent == 'recommend':
+            agent = self._agents.get('RecommendAgent')
+            if agent:
+                result = agent.run(context)
+                result['agent'] = 'RecommendAgent'
+                result['intent'] = intent
+                return result
+
+        if intent == 'hint':
+            agent = self._agents.get('HintAgent')
+            if agent:
+                result = agent.run(context)
+                result['agent'] = 'HintAgent'
+                result['intent'] = intent
+                return result
+
+        if intent == 'analyze_error':
+            agent = self._agents.get('ErrorAnalysisAgent')
+            if agent:
+                result = agent.run(context)
+                result['agent'] = 'ErrorAnalysisAgent'
+                result['intent'] = intent
+                return result
+
         if intent == 'learning_path':
             agent = self._agents.get('PathPlanningAgent')
             if agent:
@@ -156,24 +188,10 @@ class MasterAgent:
                 result['intent'] = intent
                 return result
 
-        if intent in ('recommend', 'hint', 'analyze_error'):
-            result = {
-                'agent': 'MasterAgent',
-                'intent': intent,
-                'message': f'意图识别: {intent}。该功能即将上线。',
-            }
-            if user_profile.get('_onboarding_complete'):
-                result['user_profile'] = {
-                    'strength_topics': user_profile.get('strength_topics', []),
-                    'weak_topics': user_profile.get('weak_topics', []),
-                    'recommended_focus': user_profile.get('recommended_focus', ''),
-                }
-            return result
-
         return {
             'agent': 'MasterAgent',
             'intent': intent,
-            'message': f'意图识别: {intent}。该功能即将上线。',
+            'message': '抱歉，我没太明白你的意思。你可以试试问我：推荐题目、规划学习路径、生成练习题、解题提示、或者分析错误。',
         }
 
     def handle_submission_event(self, user_id: int,
@@ -195,6 +213,8 @@ class MasterAgent:
         m = message.lower()
         if any(kw in m for kw in ['思维导图', '导图', '画图', '脑图', 'mindmap', 'mermaid']):
             return 'mindmap'
+        if any(kw in m for kw in ['编程题', '生成编程题', 'OJ题目', '算法题']):
+            return 'coding_problem'
         if any(kw in m for kw in ['出题', '题目', '生成题目', '出几道题', '练习', '选择题', '填空题', '判断题']):
             return 'exercise'
         if any(kw in m for kw in ['阅读', '材料', '资料', '推荐', '书单', '清单']):

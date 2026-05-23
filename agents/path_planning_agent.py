@@ -129,6 +129,8 @@ class PathPlanningAgent(BaseAgent):
         user_id = context.get('user_id')
         existing_profile = context.get('existing_profile', {})
         user_message = context.get('message', '')
+        manual_start = context.get('start_topic', '')
+        manual_goal = context.get('target_topic', '')
 
         if not existing_profile:
             try:
@@ -138,20 +140,25 @@ class PathPlanningAgent(BaseAgent):
                 pass
 
         weak_topics = existing_profile.get('weak_topics', [])
-        if not weak_topics:
+
+        if manual_start:
+            start = manual_start
+        elif weak_topics:
+            start = weak_topics[0]
+        else:
             return {
                 'success': False,
                 'error': '尚未收集到薄弱知识点信息，请先完成学习画像引导对话',
                 'agent': 'PathPlanningAgent',
             }
 
-        start = weak_topics[0]
-
-        onboarding_answers = existing_profile.get('_onboarding_answers', {})
-        goal = _parse_goal_from_goals(onboarding_answers)
-
-        if not goal:
-            goal = _get_default_goal()
+        if manual_goal:
+            goal = manual_goal
+        else:
+            onboarding_answers = existing_profile.get('_onboarding_answers', {})
+            goal = _parse_goal_from_goals(onboarding_answers)
+            if not goal:
+                goal = _get_default_goal()
 
         if not goal:
             return {
