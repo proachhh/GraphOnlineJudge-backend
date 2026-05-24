@@ -1,4 +1,5 @@
 import json
+import difflib
 import logging
 from typing import Any, Dict, List, Optional
 from datetime import datetime
@@ -276,6 +277,38 @@ class ProfileAgent(BaseAgent):
         profile['_updated_at'] = datetime.now().isoformat()
         return profile
 
+    def _best_match_topic(self, english_name: str) -> str:
+        try:
+            result = neo4j_client.run_query(
+                "MATCH (t:Topic) RETURN t.name AS name"
+            )
+            all_topics = [r['name'] for r in (result or [])]
+        except Exception:
+            return english_name
+
+        if not all_topics:
+            return english_name
+
+        search_clean = english_name.replace(' ', '').replace('的', '').replace('_', '')
+        for t in all_topics:
+            t_clean = t.replace(' ', '').replace('的', '').replace('_', '')
+            if search_clean == t_clean:
+                return t
+            if search_clean in t_clean or t_clean in search_clean:
+                return t
+
+        matches = difflib.get_close_matches(english_name, all_topics, n=1, cutoff=0.4)
+        if matches:
+            return matches[0]
+
+        en_lower = english_name.lower().replace(' ', '').replace('_', '')
+        for t in all_topics:
+            t_lower = t.lower().replace(' ', '').replace('_', '')
+            if en_lower in t_lower or t_lower in en_lower:
+                return t
+
+        return english_name
+
     def _fetch_user_statistics(self, user_id: int) -> str:
         try:
             from submission.models import Submission, JudgeStatus
@@ -301,7 +334,8 @@ class ProfileAgent(BaseAgent):
             tag_lines = []
             for tag in tag_stats:
                 rate = round(tag.ac / tag.total * 100, 1) if tag.total else 0
-                tag_lines.append(f"  - {tag.name}: {tag.total}次提交, 正确率{rate}%")
+                matched_name = self._best_match_topic(tag.name)
+                tag_lines.append(f"  - {matched_name}: {tag.total}次提交, 正确率{rate}%")
 
             return (
                 f"总提交数: {total}, AC数: {ac_count}, 整体正确率: {accuracy}%\n"
@@ -318,6 +352,23 @@ class ProfileAgent(BaseAgent):
             existing_profile, ensure_ascii=False, indent=2
         ) if existing_profile else '暂无'
 
+        available_topics = []
+        try:
+            result = neo4j_client.run_query(
+                "MATCH (t:Topic) RETURN t.name AS name ORDER BY t.name"
+            )
+            available_topics = [r['name'] for r in (result or [])]
+        except Exception:
+            pass
+
+        topics_constraint = ''
+        if available_topics:
+            topics_constraint = (
+                '\n\n# Neo4j 知识图谱中的 Topic 名称（仅限使用以下名称）\n'
+                '输出 strength_topics 和 weak_topics 时，必须优先从以下 Neo4j Topic 名称中选择最匹配的：\n'
+                + ', '.join(available_topics)
+            )
+
         return f"""{PROFILE_SYSTEM_PROMPT}
 
 # 用户本次对话消息
@@ -328,8 +379,10 @@ class ProfileAgent(BaseAgent):
 
 # 用户已有学习画像（增量更新上下文）
 {existing_json}
+{topics_constraint}
 
-请基于以上所有信息，输出更新后的学习画像 JSON。"""
+请基于以上所有信息，输出更新后的学习画像 JSON。
+注意：strength_topics 和 weak_topics 中的知识点名称必须优先使用上述 Neo4j 知识图谱中已有的 Topic 名称，以确保名称一致。"""
 
     def _parse_profile(self, raw_response: str) -> Dict[str, Any]:
         try:

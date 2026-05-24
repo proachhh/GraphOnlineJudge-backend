@@ -144,6 +144,7 @@ class MasterAgent:
                 result = agent.run(context)
                 result['agent'] = 'ProfileAgent'
                 result['intent'] = intent
+                result.setdefault('thinking_steps', ['正在调取学习画像...', '正在分析做题数据...'])
                 return result
 
         if intent == 'resource':
@@ -154,6 +155,7 @@ class MasterAgent:
                 result = agent.run(context)
                 result['agent'] = 'ResourceAgent'
                 result['intent'] = intent
+                result.setdefault('thinking_steps', self._get_resource_steps(resource_type, result.get('topic', '')))
                 return result
 
         if intent == 'recommend':
@@ -162,6 +164,7 @@ class MasterAgent:
                 result = agent.run(context)
                 result['agent'] = 'RecommendAgent'
                 result['intent'] = intent
+                result.setdefault('thinking_steps', ['正在调取学习画像...', '正在知识图谱召回...', '正在协同过滤召回...', '正在GNN神经网络召回...', '正在DeepFM精排...'])
                 return result
 
         if intent == 'hint':
@@ -170,6 +173,7 @@ class MasterAgent:
                 result = agent.run(context)
                 result['agent'] = 'HintAgent'
                 result['intent'] = intent
+                result.setdefault('thinking_steps', ['正在分析题目...', '正在检索解题资料...', '正在生成渐进式提示...'])
                 return result
 
         if intent == 'analyze_error':
@@ -178,6 +182,7 @@ class MasterAgent:
                 result = agent.run(context)
                 result['agent'] = 'ErrorAnalysisAgent'
                 result['intent'] = intent
+                result.setdefault('thinking_steps', ['正在获取提交历史...', '正在分析错误类型...', '正在诊断薄弱知识点...'])
                 return result
 
         if intent == 'learning_path':
@@ -186,6 +191,9 @@ class MasterAgent:
                 result = agent.run(context)
                 result['agent'] = 'PathPlanningAgent'
                 result['intent'] = intent
+                result.setdefault('thinking_steps', ['正在识别薄弱知识点...', '正在分析知识图谱依赖关系...', '正在计算最优学习路径...'])
+                if result.get('success') and result.get('path_plan'):
+                    result['display_type'] = 'path_plan'
                 return result
 
         return {
@@ -222,6 +230,24 @@ class MasterAgent:
         if any(kw in m for kw in ['代码', '案例', '实操', '示例', 'code', '编程', '实现']):
             return 'code_example'
         return 'lecture'
+
+    def _get_resource_steps(self, resource_type: str, topic: str) -> list:
+        steps = ['正在检索相关资料...', '正在分析知识图谱结构...']
+        if resource_type == 'lecture':
+            steps.append('正在生成课程讲解文档...')
+        elif resource_type == 'mindmap':
+            steps.append('正在生成思维导图...')
+        elif resource_type == 'exercise':
+            steps.append(f'正在生成练习题...')
+        elif resource_type == 'reading':
+            steps.append('正在整理阅读清单...')
+        elif resource_type == 'code_example':
+            steps.append('正在生成代码案例...')
+        elif resource_type == 'coding_problem':
+            steps.append('正在生成编程题目...')
+        else:
+            steps.append('正在生成资源...')
+        return steps
 
     @property
     def agents(self) -> Dict[str, BaseAgent]:

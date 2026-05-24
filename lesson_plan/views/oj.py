@@ -16,7 +16,7 @@ class LessonPlanAPI(APIView):
             except LessonPlan.DoesNotExist:
                 return self.error("Lesson plan does not exist")
 
-        lesson_plans = LessonPlan.objects.filter(visible=True).select_related("created_by")
+        lesson_plans = LessonPlan.objects.filter(visible=True).select_related("created_by").order_by("title")
         keyword = request.GET.get("keyword")
         if keyword:
             lesson_plans = lesson_plans.filter(title__icontains=keyword)
