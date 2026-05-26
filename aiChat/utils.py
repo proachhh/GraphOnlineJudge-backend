@@ -50,7 +50,7 @@ def ask_deepseek(prompt: str) -> str:
         return f"【错误】调用 DeepSeek 失败：{str(e)}"
 
 
-def ask_ai(prompt: str, model: str = "spark") -> str:
+def ask_ai(prompt: str, model: str = "deepseek") -> str:
     if model == "deepseek":
         return ask_deepseek(prompt)
     return ask_spark(prompt)

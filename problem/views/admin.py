@@ -90,28 +90,40 @@ class TestCaseZipProcessor(object):
         return info, test_case_id
 
     def filter_name_list(self, name_list, spj, dir=""):
-        ret = []
-        prefix = 1
+        # strip macOS metadata, directories, and hidden files
+        clean_names = []
+        for name in name_list:
+            if name.startswith("__MACOSX") or name.endswith("/") or name.startswith("."):
+                continue
+            clean_names.append(name)
+
         if spj:
-            while True:
-                in_name = f"{prefix}.in"
-                if f"{dir}{in_name}" in name_list:
-                    ret.append(in_name)
-                    prefix += 1
-                    continue
-                else:
-                    return sorted(ret, key=natural_sort_key)
-        else:
-            while True:
-                in_name = f"{prefix}.in"
-                out_name = f"{prefix}.out"
-                if f"{dir}{in_name}" in name_list and f"{dir}{out_name}" in name_list:
-                    ret.append(in_name)
-                    ret.append(out_name)
-                    prefix += 1
-                    continue
-                else:
-                    return sorted(ret, key=natural_sort_key)
+            in_files = sorted(
+                [n for n in clean_names if n.endswith(".in")],
+                key=natural_sort_key
+            )
+            return in_files
+
+        # collect .in files and match with .out
+        in_files_set = set()
+        out_files_set = set()
+        for name in clean_names:
+            if name.endswith(".in"):
+                in_files_set.add(name[:-3])  # strip .in
+            elif name.endswith(".out"):
+                out_files_set.add(name[:-4])  # strip .out
+
+        # only keep .in files that have a matching .out
+        matched_bases = sorted(
+            [b for b in in_files_set if b in out_files_set],
+            key=natural_sort_key
+        )
+
+        ret = []
+        for base in matched_bases:
+            ret.append(base + ".in")
+            ret.append(base + ".out")
+        return ret
 
 
 class TestCaseAPI(CSRFExemptAPIView, TestCaseZipProcessor):
@@ -301,7 +313,8 @@ class ProblemAPI(ProblemBase):
         keyword = request.GET.get("keyword", "").strip()
         if keyword:
             problems = problems.filter(Q(title__icontains=keyword) | Q(_id__icontains=keyword))
-        if not user.can_mgmt_all_problem():
+        show_all = request.GET.get("show_all") == "true"
+        if not user.can_mgmt_all_problem() and not show_all:
             problems = problems.filter(created_by=user)
         return self.success(self.paginate_data(request, problems, ProblemAdminSerializer))
 
@@ -432,7 +445,7 @@ class ContestProblemAPI(ProblemBase):
             problems = problems.filter(contest__created_by=user)
         keyword = request.GET.get("keyword")
         if keyword:
-            problems = problems.filter(title__contains=keyword)
+            problems = problems.filter(Q(title__icontains=keyword) | Q(_id__icontains=keyword))
         return self.success(self.paginate_data(request, problems, ProblemAdminSerializer))
 
     @validate_serializer(EditContestProblemSerializer)
@@ -790,3 +803,91 @@ class ProblemGenerateWithAIAPI(APIView):
         if not validate_serializer.is_valid():
             return self.error(f"AI 返回数据格式错误: {validate_serializer.errors}")
         return self.success(generated)
+
+
+class MatchProblemTagsAPI(APIView):
+    @problem_permission_required
+    def post(self, request):
+        title = request.data.get("title", "")
+        description = request.data.get("description", "")
+        input_description = request.data.get("input_description", "")
+        output_description = request.data.get("output_description", "")
+
+        from problem.models import ProblemTag
+        existing_tags = list(ProblemTag.objects.values_list("name", flat=True))
+        if not existing_tags:
+            return self.success({"tags": [], "message": "数据库暂无标签，请先创建"})
+
+        tags_str = "\n".join([f"- {t}" for t in existing_tags])
+
+        prompt = f"""你是一个编程题库智能标签助手。请根据以下题目信息，从数据库已有的标签列表中选择最合适的标签。
+
+【数据库已有标签】
+{tags_str}
+
+【题目信息】
+标题：{title}
+题目描述：{description[:1500]}
+输入说明：{input_description[:500]}
+输出说明：{output_description[:500]}
+
+请严格从上述数据库已有标签中选出 2-5 个最匹配的标签，以 JSON 数组格式返回。
+只能返回 JSON 数组，不要包含任何其他文字。
+如果没有任何标签匹配，返回空数组 []。
+
+示例返回：["动态规划", "背包问题", "贪心"]"""
+
+        try:
+            from aiChat.utils import ask_ai
+            raw_response = ask_ai(prompt)
+        except Exception as e:
+            return self.error(f"AI 服务调用失败：{str(e)}")
+
+        import re
+        raw_response = re.sub(r'<think>.*?</think>', '', raw_response, flags=re.DOTALL).strip()
+        json_match = re.search(r'\[.*\]', raw_response, re.DOTALL)
+        if not json_match:
+            return self.success({"tags": [], "message": "AI 未找到匹配标签"})
+
+        try:
+            matched = json.loads(json_match.group())
+        except json.JSONDecodeError:
+            return self.success({"tags": [], "message": "AI 返回数据解析失败"})
+
+        valid_tags = [t for t in matched if isinstance(t, str) and t in existing_tags]
+        return self.success({"tags": valid_tags, "message": f"匹配到 {len(valid_tags)} 个标签" if valid_tags else "未匹配到标签"})
+
+
+class ScrapeProblemAPI(APIView):
+    @problem_permission_required
+    def post(self, request):
+        url = (request.data.get('url') or '').strip()
+        if not url:
+            return self.error('请输入题目链接')
+
+        from problem.utils.scraper import parse_loj_url
+        try:
+            info = parse_loj_url(url)
+        except ValueError as e:
+            return self.error(str(e))
+
+        return self.success(info)
+
+
+class ParseLojJsonAPI(APIView):
+    @problem_permission_required
+    def post(self, request):
+        raw = request.data.get('raw')
+        if not raw:
+            return self.error('请提供 LOJ API 返回的 JSON 数据')
+
+        from problem.utils.scraper import parse_loj_api_json
+        try:
+            data = parse_loj_api_json(raw)
+        except ValueError as e:
+            return self.error(str(e))
+        except Exception as e:
+            return self.error(f'数据解析失败：{str(e)}')
+
+        return self.success(data)
+

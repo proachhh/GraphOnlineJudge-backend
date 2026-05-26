@@ -13,7 +13,7 @@ class ProblemTagAPI(APIView):
         keyword = request.GET.get("keyword")
         if keyword:
             qs = ProblemTag.objects.filter(name__icontains=keyword)
-        tags = qs.annotate(problem_count=Count("problem")).filter(problem_count__gt=0)
+        tags = qs.annotate(problem_count=Count("problem"))
         return self.success(TagSerializer(tags, many=True).data)
 
 

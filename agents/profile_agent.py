@@ -117,6 +117,7 @@ class ProfileAgent(BaseAgent):
         try:
             from aiChat.utils import ask_ai
             raw_response = ask_ai(prompt)
+            logger.info(f"AI raw response for user {user_id}: {raw_response[:300]}")
         except Exception as e:
             logger.error(f"AI invocation failed: {e}")
             return {
@@ -386,6 +387,9 @@ class ProfileAgent(BaseAgent):
 
     def _parse_profile(self, raw_response: str) -> Dict[str, Any]:
         try:
+            import re
+            raw_response = re.sub(r'<think>.*?</think>', '', raw_response, flags=re.DOTALL).strip()
+
             if '```json' in raw_response:
                 start = raw_response.index('```json') + 7
                 end = raw_response.index('```', start)
