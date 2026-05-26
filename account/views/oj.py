@@ -71,17 +71,32 @@ class AvatarUploadAPI(APIView):
             avatar = form.cleaned_data["image"]
         else:
             return self.error("Invalid file content")
-        if avatar.size > 2 * 1024 * 1024:
-            return self.error("Picture is too large")
+        if avatar.size > 5 * 1024 * 1024:
+            return self.error("Picture is too large, max 5MB")
         suffix = os.path.splitext(avatar.name)[-1].lower()
-        if suffix not in [".gif", ".jpg", ".jpeg", ".bmp", ".png"]:
+        if suffix not in [".gif", ".jpg", ".jpeg", ".bmp", ".png", ".webp"]:
             return self.error("Unsupported file format")
 
-        name = rand_str(10) + suffix
-        with open(os.path.join(settings.AVATAR_UPLOAD_DIR, name), "wb") as img:
-            for chunk in avatar:
-                img.write(chunk)
+        # 压缩图片（GIF 保留原样，其他转 JPEG）
+        if suffix == ".gif":
+            name = rand_str(10) + ".gif"
+            with open(os.path.join(settings.AVATAR_UPLOAD_DIR, name), "wb") as f:
+                for chunk in avatar:
+                    f.write(chunk)
+        else:
+            from utils.image import compress_image
+            data, out_suffix = compress_image(avatar, max_size=(400, 400), quality=80)
+            name = rand_str(10) + "." + out_suffix
+            with open(os.path.join(settings.AVATAR_UPLOAD_DIR, name), "wb") as f:
+                f.write(data)
+
         user_profile = request.user.userprofile
+        # 删除旧头像
+        old_avatar = user_profile.avatar
+        if old_avatar and old_avatar != f"{settings.AVATAR_URI_PREFIX}/default.png":
+            old_path = os.path.join(settings.AVATAR_UPLOAD_DIR, os.path.basename(old_avatar))
+            if os.path.exists(old_path):
+                os.remove(old_path)
 
         user_profile.avatar = f"{settings.AVATAR_URI_PREFIX}/{name}"
         user_profile.save()

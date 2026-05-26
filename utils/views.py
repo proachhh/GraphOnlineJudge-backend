@@ -22,22 +22,39 @@ class SimditorImageUploadAPIView(CSRFExemptAPIView):
                 "file_path": ""})
 
         suffix = os.path.splitext(img.name)[-1].lower()
-        if suffix not in [".gif", ".jpg", ".jpeg", ".bmp", ".png"]:
+        if suffix not in [".gif", ".jpg", ".jpeg", ".bmp", ".png", ".webp"]:
             return self.response({
                 "success": False,
                 "msg": "Unsupported file format",
                 "file_path": ""})
-        img_name = rand_str(10) + suffix
-        try:
-            with open(os.path.join(settings.UPLOAD_DIR, img_name), "wb") as imgFile:
-                for chunk in img:
-                    imgFile.write(chunk)
-        except IOError as e:
-            logger.error(e)
-            return self.response({
-                "success": False,
-                "msg": "Upload Error",
-                "file_path": ""})
+
+        # GIF 保留原样，其他格式压缩转 JPEG
+        if suffix == ".gif":
+            img_name = rand_str(10) + ".gif"
+            try:
+                with open(os.path.join(settings.UPLOAD_DIR, img_name), "wb") as f:
+                    for chunk in img:
+                        f.write(chunk)
+            except IOError as e:
+                logger.error(e)
+                return self.response({
+                    "success": False,
+                    "msg": "Upload Error",
+                    "file_path": ""})
+        else:
+            from utils.image import compress_image
+            try:
+                data, out_suffix = compress_image(img, max_size=(1200, 1200), quality=85)
+                img_name = rand_str(10) + "." + out_suffix
+                with open(os.path.join(settings.UPLOAD_DIR, img_name), "wb") as f:
+                    f.write(data)
+            except Exception as e:
+                logger.error(e)
+                return self.response({
+                    "success": False,
+                    "msg": "Image processing failed",
+                    "file_path": ""})
+
         return self.response({
             "success": True,
             "msg": "Success",
