@@ -113,6 +113,21 @@ def profile_init(request):
                 'profile': profile_agent.get_clean_profile(user_id) if is_complete else {},
                 'message': '画像已存在，无需重新引导' if is_complete and not profile.get('_onboarding_complete') else None,
             }
+        elif action == 'reset':
+            from utils.neo4j_client import neo4j_client
+            neo4j_client.run_query("""
+                MATCH (u:User {user_id: $user_id})
+                REMOVE u.profile_onboarding_answers,
+                       u.profile_onboarding_current_dim,
+                       u.profile_onboarding_complete,
+                       u.profile_knowledge_mastery,
+                       u.profile_strength_topics,
+                       u.profile_weak_topics,
+                       u.profile_coding_style,
+                       u.profile_learning_pace,
+                       u.profile_recommended_focus
+            """, {'user_id': user_id})
+            result = {'onboarding_complete': False, 'message': '画像已重置'}
         else:
             return JsonResponse({'error': f'未知的 action: {action}'}, status=400)
 
@@ -297,6 +312,12 @@ def agent_profile(request):
         profile['coding_style'] = raw.get('coding_style') or DEFAULT_STRINGS['coding_style']
         profile['learning_pace'] = raw.get('learning_pace') or DEFAULT_STRINGS['learning_pace']
         profile['recommended_focus'] = raw.get('recommended_focus') or DEFAULT_STRINGS['recommended_focus']
+        profile['background'] = raw.get('background', '')
+        profile['current_courses'] = raw.get('current_courses', '')
+        profile['weak_areas'] = raw.get('weak_areas', '')
+        profile['learning_goals'] = raw.get('learning_goals', '')
+        profile['learning_style'] = raw.get('learning_style', '')
+        profile['weekly_hours'] = raw.get('weekly_hours', '')
 
         return JsonResponse({
             'success': True,

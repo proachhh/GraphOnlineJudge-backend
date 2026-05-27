@@ -44,7 +44,15 @@ def sync_problem_to_neo4j(problem_id):
     # 获取题目标签列表
     tags = [tag.name for tag in problem.tags.all()]
 
-    # 如果存在标签，创建 BELONGS_TO 关系
+    # 先清除旧的 BELONGS_TO 关系，防止标签变更后残留旧关系
+    queries.append(
+        """
+        MATCH (p:Problem {problem_id: $problem_id})-[r:BELONGS_TO]->(:Topic)
+        DELETE r
+        """
+    )
+
+    # 重新建立 BELONGS_TO 关系
     if tags:
         queries.append(
             """

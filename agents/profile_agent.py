@@ -148,7 +148,6 @@ class ProfileAgent(BaseAgent):
         ]
 
         if not remaining:
-            profile.pop('_onboarding_answers', None)
             profile.pop('_onboarding_current_dim', None)
             profile['_onboarding_complete'] = True
             profile.pop('_updated_at', None)
@@ -213,7 +212,6 @@ class ProfileAgent(BaseAgent):
                 'previous_answer_stored': current_dim,
             }
 
-        profile.pop('_onboarding_answers', None)
         profile.pop('_onboarding_current_dim', None)
         profile['_onboarding_complete'] = True
 
@@ -234,6 +232,7 @@ class ProfileAgent(BaseAgent):
         })
 
         profile = result.get('profile', profile)
+        profile['_onboarding_answers'] = answered
         profile['_onboarding_complete'] = True
         profile['_updated_at'] = datetime.now().isoformat()
         self._persist_profile(user_id, profile)
@@ -507,6 +506,16 @@ class ProfileAgent(BaseAgent):
 
     def get_clean_profile(self, user_id: int) -> Dict[str, Any]:
         profile = self._load_profile_from_neo4j(user_id)
+
+        onboarding_answers = profile.get('_onboarding_answers', {})
+        if isinstance(onboarding_answers, dict):
+            profile['background'] = onboarding_answers.get('background', '')
+            profile['current_courses'] = onboarding_answers.get('current_courses', '')
+            profile['weak_areas'] = onboarding_answers.get('weak_areas', '')
+            profile['learning_goals'] = onboarding_answers.get('learning_goals', '')
+            profile['learning_style'] = onboarding_answers.get('learning_style', '')
+            profile['weekly_hours'] = onboarding_answers.get('weekly_hours', '')
+
         for key in list(profile.keys()):
             if key.startswith('_'):
                 del profile[key]

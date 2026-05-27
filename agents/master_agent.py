@@ -141,66 +141,127 @@ class MasterAgent:
         if intent == 'profile':
             agent = self._agents.get('ProfileAgent')
             if agent:
-                result = agent.run(context)
-                result['agent'] = 'ProfileAgent'
-                result['intent'] = intent
-                result.setdefault('thinking_steps', ['正在调取学习画像...', '正在分析做题数据...'])
-                return result
+                try:
+                    result = agent.run(context)
+                    result['agent'] = 'ProfileAgent'
+                    result['intent'] = intent
+                    result.setdefault('thinking_steps', ['正在调取学习画像...', '正在分析做题数据...'])
+                    return result
+                except Exception:
+                    logger.exception("ProfileAgent failed, falling back to LLM")
 
         if intent == 'resource':
             agent = self._agents.get('ResourceAgent')
             if agent:
-                resource_type = self._classify_resource_type(message)
-                context['resource_type'] = resource_type
-                result = agent.run(context)
-                result['agent'] = 'ResourceAgent'
-                result['intent'] = intent
-                result.setdefault('thinking_steps', self._get_resource_steps(resource_type, result.get('topic', '')))
-                return result
+                try:
+                    resource_type = self._classify_resource_type(message)
+                    context['resource_type'] = resource_type
+                    result = agent.run(context)
+                    result['agent'] = 'ResourceAgent'
+                    result['intent'] = intent
+                    result.setdefault('thinking_steps', self._get_resource_steps(resource_type, result.get('topic', '')))
+                    return result
+                except Exception:
+                    logger.exception("ResourceAgent failed, falling back to LLM")
 
         if intent == 'recommend':
             agent = self._agents.get('RecommendAgent')
             if agent:
-                result = agent.run(context)
-                result['agent'] = 'RecommendAgent'
-                result['intent'] = intent
-                result.setdefault('thinking_steps', ['正在调取学习画像...', '正在知识图谱召回...', '正在协同过滤召回...', '正在GNN神经网络召回...', '正在DeepFM精排...'])
-                return result
+                try:
+                    result = agent.run(context)
+                    result['agent'] = 'RecommendAgent'
+                    result['intent'] = intent
+                    result.setdefault('thinking_steps', ['正在调取学习画像...', '正在知识图谱召回...', '正在协同过滤召回...', '正在GNN神经网络召回...', '正在DeepFM精排...'])
+                    return result
+                except Exception:
+                    logger.exception("RecommendAgent failed, falling back to LLM")
 
         if intent == 'hint':
             agent = self._agents.get('HintAgent')
             if agent:
-                result = agent.run(context)
-                result['agent'] = 'HintAgent'
-                result['intent'] = intent
-                result.setdefault('thinking_steps', ['正在分析题目...', '正在检索解题资料...', '正在生成渐进式提示...'])
-                return result
+                try:
+                    result = agent.run(context)
+                    result['agent'] = 'HintAgent'
+                    result['intent'] = intent
+                    result.setdefault('thinking_steps', ['正在分析题目...', '正在检索解题资料...', '正在生成渐进式提示...'])
+                    return result
+                except Exception:
+                    logger.exception("HintAgent failed, falling back to LLM")
 
         if intent == 'analyze_error':
             agent = self._agents.get('ErrorAnalysisAgent')
             if agent:
-                result = agent.run(context)
-                result['agent'] = 'ErrorAnalysisAgent'
-                result['intent'] = intent
-                result.setdefault('thinking_steps', ['正在获取提交历史...', '正在分析错误类型...', '正在诊断薄弱知识点...'])
-                return result
+                try:
+                    result = agent.run(context)
+                    result['agent'] = 'ErrorAnalysisAgent'
+                    result['intent'] = intent
+                    result.setdefault('thinking_steps', ['正在获取提交历史...', '正在分析错误类型...', '正在诊断薄弱知识点...'])
+                    return result
+                except Exception:
+                    logger.exception("ErrorAnalysisAgent failed, falling back to LLM")
 
         if intent == 'learning_path':
             agent = self._agents.get('PathPlanningAgent')
             if agent:
-                result = agent.run(context)
-                result['agent'] = 'PathPlanningAgent'
-                result['intent'] = intent
-                result.setdefault('thinking_steps', ['正在识别薄弱知识点...', '正在分析知识图谱依赖关系...', '正在计算最优学习路径...'])
-                if result.get('success') and result.get('path_plan'):
-                    result['display_type'] = 'path_plan'
-                return result
+                try:
+                    result = agent.run(context)
+                    result['agent'] = 'PathPlanningAgent'
+                    result['intent'] = intent
+                    result.setdefault('thinking_steps', ['正在识别薄弱知识点...', '正在分析知识图谱依赖关系...', '正在计算最优学习路径...'])
+                    if result.get('success') and result.get('path_plan'):
+                        result['display_type'] = 'path_plan'
+                    return result
+                except Exception:
+                    logger.exception("PathPlanningAgent failed, falling back to LLM")
+
+        fallback = self._fallback_llm(user_id, message, intent)
+        if fallback:
+            return fallback
 
         return {
             'agent': 'MasterAgent',
             'intent': intent,
-            'message': '抱歉，我没太明白你的意思。你可以试试问我：推荐题目、规划学习路径、生成练习题、解题提示、或者分析错误。',
+            'message': '抱歉，暂时无法处理你的请求，请稍后再试。',
         }
+
+    def _fallback_llm(self, user_id: int, message: str, intent: str) -> Dict[str, Any]:
+        try:
+            from aiChat.utils import ask_ai
+
+            profile_summary = ''
+            if user_id > 0:
+                profile = self.get_clean_user_profile(user_id) or {}
+                strengths = profile.get('strength_topics', [])
+                weaks = profile.get('weak_topics', [])
+                goals = profile.get('learning_goals', '')
+                parts = []
+                if strengths:
+                    parts.append(f"强项: {', '.join(strengths)}")
+                if weaks:
+                    parts.append(f"弱项: {', '.join(weaks)}")
+                if goals:
+                    parts.append(f"学习目标: {goals}")
+                if parts:
+                    profile_summary = '\n'.join(parts)
+                else:
+                    profile_summary = ''
+
+            prompt_parts = ['你是一个专业的编程竞赛辅导助手，服务于一个在线判题系统（OJ）的学生用户。']
+            if profile_summary:
+                prompt_parts.append(f'\n学生画像:\n{profile_summary}')
+            prompt_parts.append(f'\n学生的问题：{message}')
+            prompt_parts.append('\n请给出有帮助的、结构清晰的回答。如果问题与编程无关，可以自由回答。')
+            prompt = '\n'.join(prompt_parts)
+            answer = ask_ai(prompt)
+            return {
+                'agent': 'LLM',
+                'intent': intent,
+                'message': answer,
+                'thinking_steps': ['正在调用大模型处理...'],
+            }
+        except Exception:
+            logger.exception("LLM fallback failed")
+            return None
 
     def handle_submission_event(self, user_id: int,
                                   event: Dict[str, Any]) -> Dict[str, Any]:
