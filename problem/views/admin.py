@@ -57,7 +57,7 @@ class TestCaseZipProcessor(object):
             with open(os.path.join(test_case_dir, item), "wb") as f:
                 content = zip_file.read(f"{dir}{item}").replace(b"\r\n", b"\n")
                 size_cache[item] = len(content)
-                if item.endswith(".out"):
+                if item.endswith(".out") or item.endswith(".res"):
                     md5_cache[item] = hashlib.md5(content.rstrip()).hexdigest()
                 f.write(content)
         test_case_info = {"spj": spj, "test_cases": {}}
@@ -70,7 +70,7 @@ class TestCaseZipProcessor(object):
                 info.append(data)
                 test_case_info["test_cases"][str(index + 1)] = data
         else:
-            # ["1.in", "1.out", "2.in", "2.out"] => [("1.in", "1.out"), ("2.in", "2.out")]
+            # ["1.in", "1.out", "2.in", "2.res"] => [("1.in", "1.out"), ("2.in", "2.res")]
             test_case_list = zip(*[test_case_list[i::2] for i in range(2)])
             for index, item in enumerate(test_case_list):
                 data = {"stripped_output_md5": md5_cache[item[1]],
@@ -104,25 +104,30 @@ class TestCaseZipProcessor(object):
             )
             return in_files
 
-        # collect .in files and match with .out
+        # collect .in files and match with .out or .res
         in_files_set = set()
-        out_files_set = set()
+        out_candidates = {}  # base_name -> extension (.out or .res)
         for name in clean_names:
             if name.endswith(".in"):
                 in_files_set.add(name[:-3])  # strip .in
             elif name.endswith(".out"):
-                out_files_set.add(name[:-4])  # strip .out
+                base = name[:-4]  # strip .out
+                if base not in out_candidates:
+                    out_candidates[base] = ".out"
+            elif name.endswith(".res"):
+                base = name[:-4]  # strip .res
+                out_candidates[base] = ".res"  # .res takes priority over .out
 
-        # only keep .in files that have a matching .out
+        # only keep .in files that have a matching .out or .res
         matched_bases = sorted(
-            [b for b in in_files_set if b in out_files_set],
+            [b for b in in_files_set if b in out_candidates],
             key=natural_sort_key
         )
 
         ret = []
         for base in matched_bases:
             ret.append(base + ".in")
-            ret.append(base + ".out")
+            ret.append(base + out_candidates[base])
         return ret
 
 

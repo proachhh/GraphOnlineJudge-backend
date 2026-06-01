@@ -239,3 +239,36 @@ class CodeRunAPI(APIView):
             return self.error("Code run doesn't exist")
 
         return self.success(CodeRunModelSerializer(code_run).data)
+
+
+class SelfTestAPI(APIView):
+    def throttling(self, request):
+        user_bucket = TokenBucket(key=str(request.user.id),
+                                  redis_conn=cache, **SysOptions.throttling["user"])
+        can_consume, wait = user_bucket.consume()
+        if not can_consume:
+            return "Please wait %d seconds" % (int(wait))
+
+    @login_required
+    def post(self, request):
+        code = request.data.get("code", "").strip()
+        language = request.data.get("language", "")
+        input_data = request.data.get("input", "")
+
+        if not code:
+            return self.error("Code is required")
+        if not language:
+            return self.error("Language is required")
+
+        error = self.throttling(request)
+        if error:
+            return self.error(error)
+
+        from judge.self_test import SelfTestRunner
+        runner = SelfTestRunner(code, language, input_data)
+        result = runner.run()
+
+        if result.get("success"):
+            return self.success(result)
+        else:
+            return self.error(result.get("error", "Self test failed"))
