@@ -60,6 +60,7 @@ LOCAL_APPS = [
     'knowledge_graph',
     'lesson_plan',
     'dashboard',
+    'feedback',
 ]
 
 INSTALLED_APPS = VENDOR_APPS + LOCAL_APPS 

@@ -30,10 +30,10 @@ def _get_graph_recommendations(username: str, limit: int = 20) -> List[Dict]:
     recs = []
     seen_ids = set()
 
-    def add_rec(problem_id, reason, score):
+    def add_rec(problem_id, _id, title, reason, score):
         if problem_id not in seen_ids:
             seen_ids.add(problem_id)
-            recs.append({'id': problem_id, 'reason': reason, 'score': score})
+            recs.append({'id': _id or problem_id, '_id': _id or problem_id, 'title': title, 'reason': reason, 'score': score})
 
     prereq_query = """
     MATCH (u:User {username: $username})-[:SUBMITTED]->(s:Submission)-[:FOR]->(p:Problem)-[:BELONGS_TO]->(t:Topic)
@@ -52,7 +52,7 @@ def _get_graph_recommendations(username: str, limit: int = 20) -> List[Dict]:
     try:
         result = client.run_query(prereq_query, {'username': username})
         for r in result:
-            add_rec(r['id'], f"您已掌握「{r['mastered_topic']}」，推荐学习「{r['next_topic']}」", score=90)
+            add_rec(r['id'], r.get('display_id', ''), r.get('title', ''), f"您已掌握「{r['mastered_topic']}」，推荐学习「{r['next_topic']}」", score=90)
     except Exception as e:
         logger.error(f"前置知识点推荐查询失败: {e}")
 
@@ -79,7 +79,7 @@ def _get_graph_recommendations(username: str, limit: int = 20) -> List[Dict]:
     try:
         result = client.run_query(weak_query, {'username': username})
         for r in result:
-            add_rec(r['id'], f"巩固薄弱知识点「{r['weak_topic']}」", score=85)
+            add_rec(r['id'], r.get('display_id', ''), r.get('title', ''), f"巩固薄弱知识点「{r['weak_topic']}」", score=85)
     except Exception as e:
         logger.error(f"薄弱知识点巩固查询失败: {e}")
 
@@ -104,7 +104,7 @@ def _get_graph_recommendations(username: str, limit: int = 20) -> List[Dict]:
     try:
         result = client.run_query(strength_query, {'username': username})
         for r in result:
-            add_rec(r['id'], f"拓展擅长知识点「{r['strength_topic']}」的同难度题目", score=75)
+            add_rec(r['id'], r.get('display_id', ''), r.get('title', ''), f"拓展擅长知识点「{r['strength_topic']}」的同难度题目", score=75)
     except Exception as e:
         logger.error(f"擅长知识点拓展查询失败: {e}")
 
@@ -130,7 +130,7 @@ def _get_graph_recommendations(username: str, limit: int = 20) -> List[Dict]:
     try:
         result = client.run_query(progression_query, {'username': username})
         for r in result:
-            add_rec(r['id'], f"挑战更高难度「{r['difficulty']}」的题目", score=60)
+            add_rec(r['id'], r.get('display_id', ''), r.get('title', ''), f"挑战更高难度「{r['difficulty']}」的题目", score=60)
     except Exception as e:
         logger.error(f"难度递进推荐查询失败: {e}")
 
@@ -166,7 +166,7 @@ def _get_cf_recommendations(username: str, limit: int = 30) -> List[Dict]:
             pid = r['id']
             if pid not in seen_ids:
                 seen_ids.add(pid)
-                recs.append({'id': pid, 'reason': "与您学习路径相似的用户也做了此题", 'score': 65})
+                recs.append({'id': r.get('display_id', pid), '_id': r.get('display_id', pid), 'title': r.get('title', ''), 'reason': "与您学习路径相似的用户也做了此题", 'score': 65})
     except Exception as e:
         logger.error(f"协同过滤查询失败: {e}")
 

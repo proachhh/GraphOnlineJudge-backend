@@ -51,7 +51,10 @@ class ProblemAPI(APIView):
         if problem_id:
             try:
                 problem = Problem.objects.select_related("created_by") \
-                    .get(_id=problem_id, contest_id__isnull=True, visible=True)
+                    .filter(_id=problem_id, contest_id__isnull=True, visible=True).first()
+                if not problem:
+                    problem = Problem.objects.select_related("created_by") \
+                        .get(id=problem_id, contest_id__isnull=True, visible=True)
                 problem_data = ProblemSerializer(problem).data
                 self._add_problem_status(request, problem_data)
                 return self.success(problem_data)

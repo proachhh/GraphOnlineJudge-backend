@@ -1,5 +1,7 @@
 import ipaddress
+import os
 
+from django.conf import settings
 from account.decorators import login_required, check_contest_permission
 from contest.models import ContestStatus, ContestRuleType
 from judge.tasks import judge_task
@@ -105,7 +107,68 @@ class SubmissionAPI(APIView):
             submission_data = SubmissionSafeModelSerializer(submission).data
         # 是否有权限取消共享
         submission_data["can_unshare"] = submission.check_user_permission(request.user, check_share=False)
+
+        self._attach_failed_testcase_details(submission, submission_data)
+
         return self.success(submission_data)
+
+    def _attach_failed_testcase_details(self, submission, data):
+        try:
+            self._do_attach_failed_details(submission, data)
+        except Exception:
+            pass
+
+    def _do_attach_failed_details(self, submission, data):
+        info = data.get("info", {}) if isinstance(data.get("info"), dict) else {}
+        judge_data = info.get("data", [])
+        if not judge_data:
+            return
+
+        failed_indices = [
+            int(tc["test_case"])
+            for tc in judge_data
+            if tc.get("result") != 0
+        ]
+        if not failed_indices:
+            return
+
+        test_case_dir = os.path.join(settings.TEST_CASE_DIR, submission.problem.test_case_id)
+        details = []
+
+        for idx in failed_indices[:5]:
+            in_file = os.path.join(test_case_dir, f"{idx}.in")
+            out_file = os.path.join(test_case_dir, f"{idx}.out")
+            res_file = os.path.join(test_case_dir, f"{idx}.res")
+
+            input_text = ""
+            if os.path.isfile(in_file):
+                with open(in_file, "r", encoding="utf-8", errors="replace") as f:
+                    input_text = f.read(2000)
+
+            expected_text = ""
+            if os.path.isfile(res_file):
+                with open(res_file, "r", encoding="utf-8", errors="replace") as f:
+                    expected_text = f.read(2000)
+            elif os.path.isfile(out_file):
+                with open(out_file, "r", encoding="utf-8", errors="replace") as f:
+                    expected_text = f.read(2000)
+
+            tc_info = next(
+                (tc for tc in judge_data if int(tc["test_case"]) == idx),
+                {}
+            )
+
+            details.append({
+                "test_case": idx,
+                "input": input_text,
+                "expected": expected_text,
+                "your_output": tc_info.get("output", ""),
+                "result": tc_info.get("result", 0),
+                "cpu_time": tc_info.get("cpu_time", 0),
+                "memory": tc_info.get("memory", 0),
+            })
+
+        data["failed_testcase_details"] = details
 
     @validate_serializer(ShareSubmissionSerializer)
     @login_required

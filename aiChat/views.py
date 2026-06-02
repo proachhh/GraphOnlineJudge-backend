@@ -1,8 +1,9 @@
 import json
-from django.http import JsonResponse
+import time
+from django.http import JsonResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from account.decorators import login_required
-from .utils import ask_ai
+from .utils import ask_ai, ask_ai_stream
 
 
 @csrf_exempt
@@ -19,6 +20,37 @@ def chat(request):
 
         answer = ask_ai(user_message, model=model)
         return JsonResponse({'answer': answer, 'model': model})
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+def chat_stream(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+        user_message = data.get('message', '').strip()
+        model = data.get('model', 'spark')
+        if not user_message:
+            return JsonResponse({'error': 'message is required'}, status=400)
+
+        def sse_event(event_type, data_dict):
+            return f"data: {json.dumps({'event': event_type, **data_dict}, ensure_ascii=False)}\n\n"
+
+        def event_stream():
+            for chunk in ask_ai_stream(user_message, model=model):
+                yield sse_event('chunk', {'text': chunk})
+                time.sleep(0.01)
+            yield sse_event('done', {})
+
+        response = StreamingHttpResponse(event_stream(), content_type='text/event-stream')
+        response['Cache-Control'] = 'no-cache'
+        response['X-Accel-Buffering'] = 'no'
+        return response
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
     except Exception as e:

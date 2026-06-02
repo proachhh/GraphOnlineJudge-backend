@@ -9,6 +9,7 @@ from django.http import FileResponse
 from account.decorators import check_contest_permission, ensure_created_by
 from account.models import User
 from submission.models import Submission, JudgeStatus
+from problem.models import Problem
 from utils.api import APIView, validate_serializer
 from utils.cache import cache
 from utils.constants import CacheKey
@@ -86,6 +87,23 @@ class ContestAPI(APIView):
         if keyword:
             contests = contests.filter(title__contains=keyword)
         return self.success(self.paginate_data(request, contests, ContestAdminSerializer))
+    def delete(self, request):
+        contest_id = request.GET.get("id")
+        if not contest_id:
+            return self.error("Invalid parameter, id is required")
+        try:
+            contest = Contest.objects.get(id=contest_id)
+            ensure_created_by(contest, request.user)
+            cascade = request.GET.get("cascade") == "1"
+            if cascade:
+                contest.delete()
+            else:
+                Problem.objects.filter(contest=contest).update(contest=None)
+                Submission.objects.filter(contest=contest).update(contest=None)
+                contest.delete()
+        except Contest.DoesNotExist:
+            return self.error("Contest does not exist")
+        return self.success()
 
 
 class ContestAnnouncementAPI(APIView):

@@ -22,6 +22,8 @@ urlpatterns = [
     url(r"^api/admin/", include("contest.urls.admin")),
     url(r"^api/", include("submission.urls.oj")),
     url(r"^api/admin/", include("submission.urls.admin")),
+    url(r"^api/", include("feedback.urls.oj")),
+    url(r"^api/admin/", include("feedback.urls.admin")),
     url(r"^api/admin/", include("utils.urls")),
     path('api/spark/', include('aiChat.urls')),
     path('api/agent/', include('agents.urls')),
