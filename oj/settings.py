@@ -258,13 +258,13 @@ IP_HEADER = "HTTP_X_REAL_IP"
 DEFAULT_AUTO_FIELD='django.db.models.AutoField'
 import os
 
-SPARKAI_APP_ID = os.environ.get('SPARKAI_APP_ID', '073e07dd')
-SPARKAI_API_KEY = os.environ.get('SPARKAI_API_KEY', '89c58c9ff806b199ebb047b5781051fe')
-SPARKAI_API_SECRET = os.environ.get('SPARKAI_API_SECRET', 'YmRlMzg1ZWY3NTU0YTFmZmI1ODJiNjE4')
+SPARKAI_APP_ID = os.environ.get('SPARKAI_APP_ID', '')
+SPARKAI_API_KEY = os.environ.get('SPARKAI_API_KEY', '')
+SPARKAI_API_SECRET = os.environ.get('SPARKAI_API_SECRET', '')
 SPARKAI_URL = os.environ.get('SPARKAI_URL', 'wss://spark-api.xf-yun.com/chat/pro-128k')
 SPARKAI_DOMAIN = os.environ.get('SPARKAI_DOMAIN', 'pro-128k')
 
-DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', 'sk-f7ddd245d24e4b5cbb7ff1c89c59b316')
+DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
 DEEPSEEK_BASE_URL = os.environ.get('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
 
 DEBUG = True

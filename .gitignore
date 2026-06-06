@@ -80,5 +80,9 @@ http_locations.conf
 https_locations.conf
 
 venv/
+# Environment secrets
+.env
+# Cookies / credentials
+cookies*.txt
 #test docker-compose
 docker-compose.yml

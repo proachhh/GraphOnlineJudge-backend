@@ -1,85 +1,213 @@
-# OnlineJudge 2.0
+# 新一代智能在线判题系统
 
-[![Python](https://img.shields.io/badge/python-3.8.0-blue.svg?style=flat-square)](https://www.python.org/downloads/release/python-362/)
-[![Django](https://img.shields.io/badge/django-3.2.9-blue.svg?style=flat-square)](https://www.djangoproject.com/)
-[![Django Rest Framework](https://img.shields.io/badge/django_rest_framework-3.12.0-blue.svg?style=flat-square)](http://www.django-rest-framework.org/)
-[![Build Status](https://travis-ci.org/QingdaoU/OnlineJudge.svg?branch=master)](https://travis-ci.org/QingdaoU/OnlineJudge)
+[![Python](https://img.shields.io/badge/python-3.12-blue.svg?style=flat-square)](https://www.python.org/)
+[![Django](https://img.shields.io/badge/django-3.2-blue.svg?style=flat-square)](https://www.djangoproject.com/)
+[![Vue](https://img.shields.io/badge/vue-2.x-brightgreen.svg?style=flat-square)](https://vuejs.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 
-> #### 基于 Python 和 Vue 的在线评测系统。 [Demo](https://qduoj.com)
+> 基于 Python Django + Vue.js 的智能在线判题系统，深度融合大语言模型、知识图谱与深度学习推荐技术。
 
-[English Document](README.md)
+[English](README.md)
 
-## 概览
+---
 
-+ 基于 Docker，真正一键部署
-+ 前后端分离，模块化编程，微服务
-+ ACM/OI 两种比赛模式、实时/非实时评判 任意选择
-+ 丰富的可视化图表，一图胜千言
-+ 支持 Template Problem，可以添加函数题甚至填空题
-+ 更细致的权限划分，超级管理员和普通管理员各司其职
-+ 多语言支持：`C`, `C++`, `Java`, `Python2`, `Python3`，题目可以选择使用的语言
-+ Markdown & MathJax 支持
-+ 比赛用户IP限制 (CIDR ranges)
+## 项目概述
 
-主要模块均已开源:
+本项目是一套面向高校师生及编程学习者的新一代智能在线判题（Online Judge）系统。在传统 OJ 功能之上，创新性地引入了 AI 大语言模型多智能体协作、基于 Neo4j 的知识图谱构建与表示学习、以及多模态深度学习推荐引擎，构建了从诊断到推荐再到个性化辅导的完整学习闭环。
 
-+ 后端(Django): [https://github.com/QingdaoU/OnlineJudge](https://github.com/QingdaoU/OnlineJudge)
-+ 前端(Vue): [https://github.com/QingdaoU/OnlineJudgeFE](https://github.com/QingdaoU/OnlineJudgeFE)
-+ 判题沙箱(Seccomp): [https://github.com/QingdaoU/Judger](https://github.com/QingdaoU/Judger)
-+ 判题服务器(对Judger的封装): [https://github.com/QingdaoU/JudgeServer](https://github.com/QingdaoU/JudgeServer)
+### 核心功能
 
-## 安装
+**基础平台**
+- 用户注册登录、邮箱激活、JWT Token 安全认证
+- 题库管理：多维度筛选、关键字搜索、分页浏览
+- 多语言代码在线编写与沙箱安全判题（C / C++ / Java / Python）
+- 7 种判题结果：Accepted、Wrong Answer、TLE、MLE、RE、CE 等
+- ACM 与 OI 双赛制竞赛系统，支持实时排行榜与赛后复盘
 
-请根据此进行安装:  [https://github.com/QingdaoU/OnlineJudgeDeploy/tree/2.0](https://github.com/QingdaoU/OnlineJudgeDeploy/tree/2.0)
+**AI 智能辅助**
+- **MasterAgent 多智能体框架**：下设 6 个专业智能体协同工作
+  - ProfileAgent — 生成个性化学习画像
+  - RecommendAgent — 融合多路召回推荐题目
+  - HintAgent — 渐进式解题提示
+  - ErrorAnalysisAgent — 提交失败自动诊断
+  - PathPlanningAgent — 个性化学习路径规划
+  - ResourceAgent — 自动生成教学资源
+- 多轮上下文感知对话，大语言模型驱动的智能问答
 
-## 文档
+**深度学习推荐引擎**
+- 多路召回 + 精排架构
+- **GraphSAGE 异构图神经网络（HeteroGNN）**：利用用户-题目-知识点异构图生成图嵌入
+- **Transformer 序列模型**：自注意力建模用户做题轨迹
+- **DeepFM 深度因子分解机**：精排阶段建模低阶特征交互与高阶非线性组合
 
-[http://opensource.qduoj.com/](http://opensource.qduoj.com/)
+**知识图谱与表示学习**
+- Neo4j 图数据库构建知识点 PREREQUISITE_OF 依赖图谱
+- **RGCN（关系图卷积网络）** 半监督节点分类
+- **TransE 翻译模型**学习三元组嵌入表示
+- 可视化交互式知识图谱，已掌握/未掌握状态区分
 
-## 截图
+**学习分析**
+- 个人统计概览：提交数、通过率、击败百分比、知识点分布
+- 学习趋势图表、多维学习者画像
+- 教案管理与 Markdown + 数学公式渲染
 
-### OJ前台
+**管理后台**
+- 题目增删改查、测试用例配置、代码模板管理
+- 比赛创建管理、用户权限管理
+- 数据看板：用户统计、题目分布、提交趋势可视化
 
-![problem-list](https://user-images.githubusercontent.com/20637881/33372506-402022e4-d539-11e7-8e64-6656f8ceb75a.png)
+---
 
-![problem-details](https://user-images.githubusercontent.com/20637881/33372507-4061a782-d539-11e7-8835-076ddae6b529.png)
+## 技术架构
 
-![statistic-info](https://user-images.githubusercontent.com/20637881/33372508-40a0c6ce-d539-11e7-8d5e-024541b76750.png)
+```
+┌─────────────────────────────────────────────────┐
+│                   前端 (Vue.js)                   │
+│     iView / Element UI / ECharts / CodeMirror    │
+├─────────────────────────────────────────────────┤
+│              后端 API (Django REST)               │
+│  account │ problem │ contest │ submission │ judge │
+│  aiChat │ agents │ recommend │ knowledge_graph   │
+│  lesson_plan │ learning_stats │ dashboard        │
+├─────────────────────────────────────────────────┤
+│   PostgreSQL │ Redis │ Neo4j │ ChromaDB │ Nginx   │
+├─────────────────────────────────────────────────┤
+│         AI 服务 (讯飞星火 / DeepSeek)             │
+│         判题沙箱 (Seccomp / Docker)               │
+│         异步任务队列 (Dramatiq)                    │
+└─────────────────────────────────────────────────┘
+```
 
-![contest-list](https://user-images.githubusercontent.com/20637881/33372509-40d880dc-d539-11e7-9eba-1f08dcb6b9a0.png)
+## 环境要求
 
-Rankings 中可以控制图表和菜单的显隐。
-![acm-rankings](https://user-images.githubusercontent.com/20637881/33372510-41117f68-d539-11e7-9947-70e60bad3cf2.png)
-![oi-rankings](https://user-images.githubusercontent.com/20637881/33372511-41d406fa-d539-11e7-9947-7a2a088785b0.png)
+- Python 3.12+
+- PostgreSQL 14+
+- Redis 7+
+- Neo4j 5.x
+- Node.js 16+（前端构建）
+- Docker & Docker Compose
 
-![status](https://user-images.githubusercontent.com/20637881/33372512-420ba240-d539-11e7-8645-594cac4a0b78.png)
+## 快速开始
 
-![status-details](https://user-images.githubusercontent.com/20637881/33365523-787bd0ea-d523-11e7-953f-dacbf7a506df.png)
+### 1. 克隆仓库
 
-![user-home](https://user-images.githubusercontent.com/20637881/33365521-7842d808-d523-11e7-84c1-2e2aa0079f32.png)
+```bash
+git clone <本项目地址>
+cd <项目目录>
+```
 
-### 后台管理
+### 2. 配置环境变量
 
-![admin-users](https://user-images.githubusercontent.com/20637881/33372516-42c34fda-d539-11e7-9f4e-5109477f83be.png)
+```bash
+cp .env.example .env
+# 编辑 .env 填入数据库连接、AI API Key 等配置
+```
 
-![judge-server](https://user-images.githubusercontent.com/20637881/33372517-42faef9e-d539-11e7-9f17-df9be3583900.png)
+### 3. 后端初始化
 
-![create-problem](https://user-images.githubusercontent.com/20637881/33372513-42472162-d539-11e7-8659-5497bf52dbea.png)
+```bash
+pip install -r deploy/requirements.txt
+python manage.py migrate
+python manage.py initadmin  # 创建初始管理员账号
+python manage.py runserver
+```
 
-![create-contest](https://user-images.githubusercontent.com/20637881/33372514-428ab922-d539-11e7-8f68-da55dedf3ad3.png)
+### 4. 前端构建
 
+```bash
+cd ../OJFE
+npm install
+npm run build
+# 构建产物输出到 OJ/frontend_dist/
+```
 
-## 浏览器支持
+### 5. Docker 一键部署（生产环境推荐）
 
-Modern browsers(chrome, firefox) 和 Internet Explorer 10+.
+```bash
+docker compose up -d
+```
 
-## 特别感谢
+---
 
-+ 所有为本项目做出贡献的人
-+ [heb1c](https://github.com/hebicheng) 同学为我们提供了很多意见和建议
+## 项目结构
 
-如果您觉得这个项目还不错，就star一下吧 ：)
+```
+├── account/           # 用户系统
+├── agents/            # AI 多智能体
+├── aiChat/            # AI 对话
+├── announcement/      # 公告
+├── conf/              # 判题服务器配置
+├── contest/           # 竞赛系统
+├── dashboard/         # 管理后台数据看板
+├── feedback/          # 用户反馈
+├── judge/             # 判题引擎
+├── knowledge_graph/   # 知识图谱
+├── learning_stats/    # 学习分析
+├── lesson_plan/       # 教案管理
+├── oj/                # Django 项目配置
+├── options/           # 系统选项
+├── problem/           # 题库管理
+├── recommend/         # 推荐引擎
+├── submission/        # 提交判题
+├── utils/             # 工具函数
+├── deploy/            # 部署配置
+└── frontend_dist/     # 前端构建产物（部署时）
+```
 
-## 许可
+---
 
-The [MIT](http://opensource.org/licenses/MIT) License
+## 第三方依赖声明
+
+本项目基于以下优秀的开源库构建，特此致谢：
+
+### 后端核心依赖
+
+| 库 | 许可证 | 用途 |
+|------|------|------|
+| Django 3.2 | BSD | Web 框架 |
+| Django REST Framework | BSD | REST API 框架 |
+| psycopg2 | LGPL | PostgreSQL 驱动 |
+| dramatiq | LGPLv3 | 异步任务队列 |
+| django-redis | BSD | Redis 缓存后端 |
+| Pillow | HPND | 图像处理 |
+| XlsxWriter | BSD | Excel 导出 |
+| neo4j-driver | Apache 2.0 | Neo4j 图数据库驱动 |
+| chromadb | Apache 2.0 | 向量数据库 |
+| openai | Apache 2.0 | LLM API 调用 |
+| PyTorch | BSD | 深度学习框架 |
+| scikit-learn | BSD | 机器学习 |
+| numpy | BSD | 科学计算 |
+| gunicorn | MIT | WSGI 服务器 |
+
+### 前端核心依赖
+
+| 库 | 许可证 | 用途 |
+|------|------|------|
+| Vue.js 2.x | MIT | 前端框架 |
+| Vuex | MIT | 状态管理 |
+| Vue Router | MIT | 路由管理 |
+| Vue I18n | MIT | 国际化 |
+| axios | MIT | HTTP 客户端 |
+| iView | MIT | UI 组件库 |
+| Element UI | MIT | UI 组件库 |
+| CodeMirror | MIT | 代码编辑器 |
+| KaTeX | MIT | 数学公式渲染 |
+| highlight.js | BSD | 代码高亮 |
+| ECharts | Apache 2.0 | 数据可视化 |
+| moment.js | MIT | 日期处理 |
+
+本项目本身基于 [QingdaoU/OnlineJudge](https://github.com/QingdaoU/OnlineJudge)（MIT 许可证）二次开发，在前者基础上进行了大量扩展与改进，新增了 AI 智能体、深度学习推荐引擎、知识图谱等核心模块。原始版权声明见下方。
+
+---
+
+## 许可证
+
+本项目采用 [MIT 许可证](LICENSE)。
+
+本项目在 [QingdaoU/OnlineJudge](https://github.com/QingdaoU/OnlineJudge)（MIT 许可证）的基础上进行扩展开发，原始代码版权归原作者所有：
+
+```
+Copyright (c) 2017-present Qingdao University OnlineJudge Contributors
+```
+
+新增模块代码版权归本项目作者所有。
