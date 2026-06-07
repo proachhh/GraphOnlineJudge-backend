@@ -88,7 +88,7 @@
 - Docker & Docker Compose
 
 ## 快速开始
-/home/proach/OnlineJudgeDeploy
+https://github.com/proachhh/GraphOnlineJudge-backend.git
 
 ---
 
