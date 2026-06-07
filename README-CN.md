@@ -88,44 +88,7 @@
 - Docker & Docker Compose
 
 ## 快速开始
-
-### 1. 克隆仓库
-
-```bash
-git clone <本项目地址>
-cd <项目目录>
-```
-
-### 2. 配置环境变量
-
-```bash
-cp .env.example .env
-# 编辑 .env 填入数据库连接、AI API Key 等配置
-```
-
-### 3. 后端初始化
-
-```bash
-pip install -r deploy/requirements.txt
-python manage.py migrate
-python manage.py initadmin  # 创建初始管理员账号
-python manage.py runserver
-```
-
-### 4. 前端构建
-
-```bash
-cd ../OJFE
-npm install
-npm run build
-# 构建产物输出到 OJ/frontend_dist/
-```
-
-### 5. Docker 一键部署（生产环境推荐）
-
-```bash
-docker compose up -d
-```
+/home/proach/OnlineJudgeDeploy
 
 ---
 
