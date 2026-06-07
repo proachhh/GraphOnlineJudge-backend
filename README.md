@@ -88,45 +88,7 @@ This project is a next-generation online judge system designed for university st
 - Docker & Docker Compose
 
 ## Quick Start
-
-### 1. Clone
-
-```bash
-git clone <repo-url>
-cd <project-directory>
-```
-
-### 2. Configure Environment
-
-```bash
-cp .env.example .env
-# Edit .env with your database connection, AI API keys, etc.
-```
-
-### 3. Backend Setup
-
-```bash
-pip install -r deploy/requirements.txt
-python manage.py migrate
-python manage.py initadmin  # Create initial admin account
-python manage.py runserver
-```
-
-### 4. Frontend Build
-
-```bash
-cd ../OJFE
-npm install
-npm run build
-# Output goes to OJ/frontend_dist/
-```
-
-### 5. Docker Deployment (Recommended for Production)
-
-```bash
-docker compose up -d
-```
-
+https://github.com/proachhh/OnlineJudgeDeploy.git
 ---
 
 ## Project Structure
