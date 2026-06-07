@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MyOJ" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="colorPrimary">#1e3a8a</item>
+        <item name="colorPrimaryDark">#152c6b</item>
+        <item name="colorAccent">#3b82f6</item>
+        <item name="android:windowFullscreen">false</item>
+    </style>
+</resources>
