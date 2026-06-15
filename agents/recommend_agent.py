@@ -31,9 +31,10 @@ def _get_graph_recommendations(username: str, limit: int = 20) -> List[Dict]:
     seen_ids = set()
 
     def add_rec(problem_id, _id, title, reason, score):
-        if problem_id not in seen_ids:
-            seen_ids.add(problem_id)
-            recs.append({'id': _id or problem_id, '_id': _id or problem_id, 'title': title, 'reason': reason, 'score': score})
+        pid_int = int(problem_id) if problem_id is not None else 0
+        if pid_int not in seen_ids:
+            seen_ids.add(pid_int)
+            recs.append({'id': pid_int, '_id': _id, 'title': title, 'reason': reason, 'score': score})
 
     prereq_query = """
     MATCH (u:User {username: $username})-[:SUBMITTED]->(s:Submission)-[:FOR]->(p:Problem)-[:BELONGS_TO]->(t:Topic)
@@ -164,9 +165,10 @@ def _get_cf_recommendations(username: str, limit: int = 30) -> List[Dict]:
         result = client.run_query(cf_query, {'username': username, 'limit': limit})
         for r in result:
             pid = r['id']
-            if pid not in seen_ids:
-                seen_ids.add(pid)
-                recs.append({'id': r.get('display_id', pid), '_id': r.get('display_id', pid), 'title': r.get('title', ''), 'reason': "与您学习路径相似的用户也做了此题", 'score': 65})
+            pid_int = int(pid) if pid is not None else 0
+            if pid_int not in seen_ids:
+                seen_ids.add(pid_int)
+                recs.append({'id': pid_int, '_id': r.get('display_id', ''), 'title': r.get('title', ''), 'reason': "与您学习路径相似的用户也做了此题", 'score': 65})
     except Exception as e:
         logger.error(f"协同过滤查询失败: {e}")
 

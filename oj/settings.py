@@ -268,3 +268,6 @@ DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
 DEEPSEEK_BASE_URL = os.environ.get('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
 
 DEBUG = True
+
+# 持久化数据库连接，避免每个请求都新建连接
+CONN_MAX_AGE = 60

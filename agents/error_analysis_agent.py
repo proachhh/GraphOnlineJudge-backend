@@ -39,6 +39,7 @@ class ErrorAnalysisAgent(BaseAgent):
         user_id = context.get('user_id')
         user_message = context.get('message', '')
         existing_profile = context.get('existing_profile', {})
+        submission_id = context.get('submission_id', '')
 
         if not user_id:
             return {
@@ -47,6 +48,121 @@ class ErrorAnalysisAgent(BaseAgent):
                 'agent': 'ErrorAnalysisAgent',
             }
 
+        # 如果传入了 submission_id，针对该提交做精确分析
+        if submission_id:
+            return self._analyze_specific_submission(
+                user_id, submission_id, user_message, existing_profile
+            )
+
+        # 否则做泛化的最近错误分析
+        return self._analyze_recent_errors(
+            user_id, user_message, existing_profile
+        )
+
+    def _analyze_specific_submission(self, user_id: int, submission_id: str,
+                                      user_message: str, existing_profile: Dict) -> Dict:
+        from submission.models import Submission, JudgeStatus
+
+        try:
+            submission = Submission.objects.get(id=submission_id)
+        except Submission.DoesNotExist:
+            return {
+                'success': False,
+                'error': f'提交记录 {submission_id} 不存在',
+                'agent': 'ErrorAnalysisAgent',
+            }
+
+        result_map = {
+            JudgeStatus.WRONG_ANSWER: '答案错误',
+            JudgeStatus.COMPILE_ERROR: '编译错误',
+            JudgeStatus.CPU_TIME_LIMIT_EXCEEDED: '运行超时',
+            JudgeStatus.REAL_TIME_LIMIT_EXCEEDED: '运行超时',
+            JudgeStatus.MEMORY_LIMIT_EXCEEDED: '内存超限',
+            JudgeStatus.RUNTIME_ERROR: '运行时错误',
+        }
+
+        status_text = result_map.get(submission.result, f'未知错误(状态码:{submission.result})')
+        error_info = (submission.statistic_info or {}).get('err_info', '')
+        time_cost = (submission.statistic_info or {}).get('time_cost', 'N/A')
+        memory_cost = (submission.statistic_info or {}).get('memory_cost', 'N/A')
+
+        failed_cases = []
+        for item in (submission.info or {}).get('data', []):
+            if item.get('result') != 0:
+                failed_cases.append(item)
+        failed_cases = failed_cases[:3]
+
+        kg_context = self._fetch_user_kg_context(user_id)
+        rag_context = self._search_errors(user_message)
+
+        prompt = f"""你是一个编程竞赛 OJ 系统的 AI 助教。用户正在询问一条特定提交的错误分析，请只针对这一条提交进行分析。
+
+【用户补充说明】
+{user_message if user_message else '无'}
+
+【题目信息】
+标题：{submission.problem.title}
+难度：{submission.problem.difficulty}
+时间限制：{submission.problem.time_limit}ms
+内存限制：{submission.problem.memory_limit}MB
+
+【提交状态】
+状态：{status_text}
+语言：{submission.language}
+运行时间：{time_cost}
+运行内存：{memory_cost}
+编译错误信息：{error_info if error_info else '无'}
+
+【失败测试点】
+{failed_cases if failed_cases else '暂无详细测试点信息'}
+
+【用户代码】
+```{submission.language}
+{submission.code[:3000]}
+```
+
+【学生画像】
+强项: {', '.join(existing_profile.get('strength_topics', []) or ['暂无'])}
+弱项: {', '.join(existing_profile.get('weak_topics', []) or ['暂无'])}
+
+【知识图谱上下文】
+{kg_context}
+
+【参考资料】
+{rag_context}
+
+请用中文回答，格式如下：
+## 错误诊断
+（1-2句话，指出代码中可能的错误原因）
+
+## 具体分析
+（2-3个要点，分析代码逻辑问题或边界条件遗漏）
+
+## 修复建议
+（给出具体的修改方向和示例思路，可包含伪代码）"""
+
+        try:
+            from aiChat.utils import ask_ai
+            response = ask_ai(prompt)
+        except Exception as e:
+            logger.error(f"AI call failed: {e}")
+            return {
+                'success': False,
+                'error': f'AI 服务调用失败: {str(e)}',
+                'agent': 'ErrorAnalysisAgent',
+            }
+
+        return {
+            'success': True,
+            'analysis': response,
+            'submission_id': submission_id,
+            'display_type': 'error_analysis',
+            'agent': 'ErrorAnalysisAgent',
+            'intent': 'analyze_error',
+        }
+
+    def _analyze_recent_errors(self, user_id: int, user_message: str,
+                                existing_profile: Dict) -> Dict:
         submission_history = self._get_recent_errors(user_id)
         problem_summary = self._summarize_problems(submission_history)
 

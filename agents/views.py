@@ -33,6 +33,7 @@ def agent_chat(request):
     resource_type = data.get('resource_type', '')
     topic = data.get('topic', '')
     difficulty = data.get('difficulty', 'Mid')
+    submission_id = data.get('submission_id', '')
 
     user_id = None
     if request.user.is_authenticated:
@@ -40,12 +41,17 @@ def agent_chat(request):
 
     try:
         extra_context = {}
+        agent_type = data.get('agent_type', '')
+        if agent_type:
+            extra_context['agent_type'] = agent_type
         if resource_type:
             extra_context['resource_type'] = resource_type
         if topic:
             extra_context['topic'] = topic
         if difficulty:
             extra_context['difficulty'] = difficulty
+        if submission_id:
+            extra_context['submission_id'] = submission_id
 
         result = master_agent.handle_message(user_id or 0, user_message, extra_context)
         return JsonResponse({
@@ -190,30 +196,117 @@ def agent_chat_stream(request):
     if not user_message:
         return JsonResponse({'error': 'message is required'}, status=400)
 
+    submission_id = data.get('submission_id', '')
+    resource_type = data.get('resource_type', '')
+    topic = data.get('topic', '')
+    difficulty = data.get('difficulty', 'Mid')
+    agent_type = data.get('agent_type', '')
+
     user_id = None
     if request.user.is_authenticated:
         user_id = request.user.id
+
+    extra_context = {}
+    if agent_type:
+        extra_context['agent_type'] = agent_type
+    if resource_type:
+        extra_context['resource_type'] = resource_type
+    if topic:
+        extra_context['topic'] = topic
+    if difficulty:
+        extra_context['difficulty'] = difficulty
+    if submission_id:
+        extra_context['submission_id'] = submission_id
 
     def sse_event(event_type, data):
         return f"data: {json.dumps({'event': event_type, **data}, ensure_ascii=False)}\n\n"
 
     def event_stream():
-        result = master_agent.handle_message(user_id or 0, user_message)
-        thinking_steps = result.get('thinking_steps', [])
-
+        # 1. 先做意图分类（不调 LLM），发送思考步骤
+        intent = master_agent.classify_intent(user_message)
+        thinking_steps = _get_thinking_steps(intent)
         for step in thinking_steps:
             yield sse_event('step', {'text': step})
             time.sleep(0.3)
 
-        yield sse_event('done', {})
-        time.sleep(0.15)
+        # 2. 调 handle_message 获取完整结果（内部调 ask_ai 非流式）
+        result = master_agent.handle_message(user_id or 0, user_message, extra_context)
 
+        # 如果 result 里也有 thinking_steps 但没有预设的，补上
+        if not result.get('thinking_steps'):
+            result['thinking_steps'] = thinking_steps
+
+        yield sse_event('done', {})
+        time.sleep(0.1)
+
+        # 3. 提取文本内容，模拟流式逐字发送
+        text = _get_result_text(result)
+        if text:
+            # 按句子/段落拆分成块，模拟真实流式输出
+            import re
+            chunks = _split_for_stream(text)
+            for chunk in chunks:
+                yield sse_event('chunk', {'text': chunk})
+                time.sleep(0.02)
+
+        # 4. 发送最终结构化结果（前端会替换为格式化卡片）
         yield sse_event('result', {'data': result})
 
     response = StreamingHttpResponse(event_stream(), content_type='text/event-stream')
     response['Cache-Control'] = 'no-cache'
     response['X-Accel-Buffering'] = 'no'
     return response
+
+
+def _get_thinking_steps(intent):
+    steps_map = {
+        'profile': ['正在调取学习画像...', '正在分析做题数据...', '正在生成能力评估...'],
+        'recommend': ['正在调取学习画像...', '正在知识图谱召回...', '正在协同过滤召回...', '正在 GNN 神经网络召回...', '正在 DeepFM 精排...'],
+        'hint': ['正在分析题目...', '正在检索解题资料...', '正在生成渐进式提示...'],
+        'analyze_error': ['正在获取提交历史...', '正在分析错误类型...', '正在诊断薄弱知识点...'],
+        'learning_path': ['正在识别薄弱知识点...', '正在分析知识图谱依赖关系...', '正在计算最优学习路径...'],
+        'resource': ['正在检索教学资料...', '正在生成内容...'],
+    }
+    return steps_map.get(intent, ['正在思考中...'])
+
+
+def _get_result_text(result):
+    """从 agent 结果中提取用于流式显示的文本"""
+    # 优先取直接文本字段
+    for key in ('message', 'analysis', 'hint', 'content'):
+        text = result.get(key)
+        if text and isinstance(text, str) and len(text) > 20:
+            return text
+    return ''
+
+
+def _split_for_stream(text):
+    """将文本拆分成适合流式显示的块"""
+    import re
+    chunks = []
+    # 先按段落分
+    parts = re.split(r'(\n\n|\n)', text)
+    for part in parts:
+        if not part.strip():
+            chunks.append(part)
+            continue
+        # 段落太长则按句子分
+        if len(part) > 80:
+            sentences = re.split(r'([。！？!?\n])', part)
+            for i in range(0, len(sentences), 2):
+                sentence = sentences[i]
+                if i + 1 < len(sentences):
+                    sentence += sentences[i + 1]
+                if sentence.strip():
+                    # 句子太长再按长度切
+                    if len(sentence) > 30:
+                        for j in range(0, len(sentence), 20):
+                            chunks.append(sentence[j:j + 20])
+                    else:
+                        chunks.append(sentence)
+        else:
+            chunks.append(part)
+    return chunks
 
 
 @csrf_exempt

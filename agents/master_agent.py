@@ -20,7 +20,7 @@ INTENT_KEYWORDS = {
              '解答', '不会做', '教教我'],
     'analyze_error': ['为什么错了', '哪里错了', '错误分析', '帮我看看', '提交失败',
                       '运行错误', '编译错误', '超时', '为什么没过', '错在哪',
-                      '提交错了', '哪里不对', '报错了'],
+                      '提交错了', '哪里不对', '报错了', '为什么出错', '分析错误', '怎么错了'],
     'learning_path': ['学习路径', '学习路线', '怎么学', '学习计划', '进阶路线',
                       '先学什么', '路线图'],
     'resource': ['生成资料', '讲解', '出题', '思维导图', '阅读材料', '代码案例',
@@ -112,7 +112,10 @@ class MasterAgent:
                         extra_context: Dict[str, Any] = None) -> Dict[str, Any]:
         user_profile = self.load_user_profile(user_id)
 
-        if user_profile and not user_profile.get('_onboarding_complete', True):
+        # 只有通用对话才检查 onboarding，显式请求的 agent 功能不拦截
+        forced_agent = (extra_context or {}).get('agent_type', '')
+
+        if not forced_agent and user_profile and not user_profile.get('_onboarding_complete', True):
             agent = self._agents.get('ProfileAgent')
             if agent:
                 result = agent.process_onboarding_answer(user_id, message)
@@ -125,6 +128,26 @@ class MasterAgent:
                     'step': result.get('step'),
                     'total_steps': result.get('total_steps'),
                 }
+
+        # 显式指定 agent 时直接路由
+        if forced_agent:
+            agent = self._agents.get(forced_agent)
+            if agent:
+                context = {
+                    'user_id': user_id,
+                    'message': message,
+                    'intent': forced_agent.lower(),
+                    'existing_profile': user_profile,
+                }
+                if extra_context:
+                    context.update(extra_context)
+                try:
+                    result = agent.run(context)
+                    result['agent'] = forced_agent
+                    result['intent'] = forced_agent.lower()
+                    return result
+                except Exception:
+                    logger.exception(f"{forced_agent} failed, falling back to intent classification")
 
         intent = self.classify_intent(message)
         logger.info(f"MasterAgent: user_id={user_id}, intent={intent}, message='{message[:80]}...'")

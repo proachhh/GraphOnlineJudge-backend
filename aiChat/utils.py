@@ -100,5 +100,6 @@ def ask_deepseek_stream(prompt: str):
 
 def ask_ai_stream(prompt: str, model: str = "deepseek"):
     if model == "deepseek":
-        return ask_deepseek_stream(prompt)
-    return ask_spark_stream(prompt)
+        yield from ask_deepseek_stream(prompt)
+    else:
+        yield from ask_spark_stream(prompt)

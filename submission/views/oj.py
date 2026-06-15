@@ -101,7 +101,7 @@ class SubmissionAPI(APIView):
         if not submission.check_user_permission(request.user):
             return self.error("No permission for this submission")
 
-        if submission.problem.rule_type == ProblemRuleType.OI or request.user.is_admin_role():
+        if submission.problem.rule_type == ProblemRuleType.OI or request.user.is_admin_role() or submission.user_id == request.user.id:
             submission_data = SubmissionModelSerializer(submission).data
         else:
             submission_data = SubmissionSafeModelSerializer(submission).data

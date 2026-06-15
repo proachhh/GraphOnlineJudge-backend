@@ -10,6 +10,94 @@ logger = logging.getLogger(__name__)
 MAX_PATH_DEPTH = 10
 FALLBACK_DEPTH = 3
 
+# 中文Topic名 → 英文ProblemTag关键词映射
+# 用于在Neo4j BELONGS_TO缺失时，回退到PostgreSQL查询
+TOPIC_TO_TAG_KEYWORDS = {
+    '数组': ['array', 'Array'],
+    '栈': ['stack'],
+    '队列': ['queue'],
+    '串的基本概念': ['string', 'String', 'char', 'character'],
+    '字符串匹配': ['string', 'String', 'stringMatch', 'kmp'],
+    '二分查找': ['binarySearch', 'binary'],
+    '二叉搜索树': ['binarySearch', 'binary'],
+    '二叉树的基本概念': ['binary', 'BinaryTree', 'Binary Tree'],
+    '二叉树的遍历方式': ['binary', 'dfs', 'bfs', 'BinaryTree', 'Binary Tree'],
+    '优先队列': ['priorityQueue', 'heap', 'Heap'],
+    '位运算技巧': ['bitmask', 'bit'],
+    '冒泡排序': ['sorting', 'sort', 'sorted'],
+    '分治算法': ['divideAndConquer', 'merge'],
+    '前缀和': ['prefix', 'Prefix Sum', 'PrefixSum'],
+    '动态规划': ['Dynamic Programming', 'DynamicProgramming', 'dp'],
+    '单调栈': ['stack'],
+    '单调队列': ['queue'],
+    '单链表': ['linkedList', 'list'],
+    '双向链表': ['linkedList', 'list'],
+    '双指针': ['twoPointer'],
+    '双端队列': ['queue', 'deque'],
+    '哈夫曼树': ['binary', 'tree'],
+    '哈希表-开放地址法': ['hash', 'Hash'],
+    '哈希表-链地址法': ['hash', 'Hash'],
+    '图的基本概念': ['graph', 'Graph'],
+    '图的存储-邻接矩阵': ['graph', 'Graph', 'matrix', 'Matrix'],
+    '图的存储-邻接表': ['graph', 'Graph'],
+    '图的连通分量': ['graph', 'Graph', 'dfs'],
+    '基数排序': ['radix', 'sorting', 'sort'],
+    '堆排序': ['sorting', 'sort', 'heap', 'Heap'],
+    '外部排序': ['sorting', 'sort'],
+    '差分数组': ['prefix', 'array', 'Array'],
+    '希尔排序': ['sorting', 'sort'],
+    '平衡二叉树': ['binary', 'balanced', 'tree'],
+    '并查集': ['unionFind', 'disjointSet', 'graph'],
+    '广度优先搜索': ['bfs', 'BFS'],
+    '强连通分量': ['graph', 'Graph', 'dfs'],
+    '归并排序': ['merge', 'divideAndConquer', 'sorting', 'sort'],
+    '循环链表': ['linkedList', 'list'],
+    '循环队列': ['queue'],
+    '快速排序': ['sorting', 'sort', 'quick'],
+    '拓扑排序': ['topologicalSort', 'graph', 'Graph'],
+    '插入排序': ['insertion', 'sorting', 'sort'],
+    '时间复杂度': ['timeComplexity'],
+    '最小生成树': ['graph', 'Graph', 'minimumSpanningTree', 'mst'],
+    '最短路径': ['shortestPath', 'graph', 'Graph'],
+    '朴素模式匹配': ['string', 'String', 'stringMatch'],
+    '栈的应用-括号匹配': ['stack'],
+    '栈的应用-表达式求值': ['stack'],
+    '树': ['tree', 'binary', 'BinaryTree', 'Binary Tree'],
+    '树状数组': ['fenwick', 'binaryIndexedTree'],
+    '桶排序': ['sorting', 'sort', 'bucket'],
+    '深度优先搜索': ['dfs', 'DFS'],
+    '滑动窗口': ['sliding', 'slidingWindow', 'slidingPuzzle'],
+    '空间复杂度': ['spaceComplexity'],
+    '红黑树': ['binary', 'tree', 'balanced'],
+    '线性表': ['array', 'Array', 'list'],
+    '线段树': ['segmentTree'],
+    '线索二叉树': ['binary', 'tree'],
+    '计数排序': ['counting', 'countingSort', 'sorting', 'sort'],
+    '记忆化搜索': ['dfs', 'memoization', 'dp'],
+    '跳表': ['skipList', 'list'],
+    '选择排序': ['selection', 'selectionSort', 'sorting', 'sort'],
+    '递归': ['Recursion', 'recursion'],
+    '链栈': ['stack', 'linkedList'],
+    '链队列': ['queue', 'linkedList'],
+    '顺序查找': ['search', 'simulation'],
+    '顺序栈': ['stack', 'array', 'Array'],
+    '顺序表': ['array', 'Array', 'list'],
+    '0-1 背包问题': ['Dynamic Programming', 'DynamicProgramming', 'dp'],
+    'AC 自动机': ['string', 'String', 'automaton'],
+    'B 树': ['binary', 'tree'],
+    'B+ 树': ['binary', 'tree'],
+    'Boyer-Moore 算法': ['string', 'String', 'stringMatch'],
+    'Floyd 判圈算法': ['graph', 'Graph', 'cycle'],
+    'KMP 算法': ['string', 'String', 'stringMatch', 'kmp'],
+    'SPFA 算法': ['graph', 'Graph', 'shortestPath'],
+    'Trie 树': ['trie', 'string', 'String', 'tree'],
+    '关键路径': ['graph', 'Graph', 'topologicalSort'],
+    '指针与引用': ['pointer'],
+    '迭代与遍历': ['iteration'],
+    '逆波兰表达式': ['stack', 'expression'],
+}
+
+
 
 def _safe_float(val, default: float = 3.0) -> float:
     try:
@@ -92,17 +180,116 @@ def _fallback_paths(start: str) -> List[List[Dict]]:
         return []
 
 
+def _get_matching_tag_names(topic_name: str) -> list:
+    """为 Neo4j Topic 名称在 PostgreSQL ProblemTag 中查找匹配的标签名"""
+    if not topic_name:
+        return []
+    try:
+        from problem.models import ProblemTag
+        all_tags = list(ProblemTag.objects.values_list('name', flat=True).distinct())
+    except Exception:
+        return []
+
+    # 1. 精确匹配
+    if topic_name in all_tags:
+        return [topic_name]
+
+    topic_lower = topic_name.strip().lower()
+    matches = set()
+
+    # 2. 大小写不敏感精确匹配
+    for tag in all_tags:
+        if tag.strip().lower() == topic_lower:
+            matches.add(tag)
+
+    # 3. 包含匹配（tag 名包含 topic 名或反过来）
+    if not matches:
+        for tag in all_tags:
+            tag_lower = tag.strip().lower()
+            if topic_lower in tag_lower or tag_lower in topic_lower:
+                if len(topic_lower) >= 3 or len(tag_lower) >= 3:
+                    matches.add(tag)
+
+    # 4. 单词级匹配（对于 "Dynamic Programming" ↔ "DynamicProgramming" 的情况）
+    if not matches:
+        topic_words = set(topic_lower.replace('-', ' ').replace('_', ' ').split())
+        for tag in all_tags:
+            tag_words = set(tag.strip().lower().replace('-', ' ').replace('_', ' ').split())
+            if topic_words and tag_words:
+                overlap = topic_words & tag_words
+                if len(overlap) >= len(topic_words) * 0.5 or len(overlap) >= 2:
+                    matches.add(tag)
+
+    # 5. 中文关键词映射（解决中文Topic名与英文Tag名不匹配的问题）
+    if not matches and topic_name in TOPIC_TO_TAG_KEYWORDS:
+        keywords = TOPIC_TO_TAG_KEYWORDS[topic_name]
+        for tag in all_tags:
+            tag_lower_compact = tag.strip().lower().replace(' ', '').replace('-', '').replace('_', '')
+            for kw in keywords:
+                kw_compact = kw.lower().replace(' ', '').replace('-', '').replace('_', '')
+                if tag_lower_compact == kw_compact:
+                    matches.add(tag)
+                    break
+                if kw_compact in tag_lower_compact and len(kw_compact) >= 3:
+                    matches.add(tag)
+                    break
+
+    return list(matches)[:5]
+
+
 def _get_problem_count(topic_name: str) -> int:
+    # 策略1：从 Neo4j BELONGS_TO 查询
     try:
         result = neo4j_client.run_query("""
             MATCH (t:Topic {name: $name})<-[r:BELONGS_TO]-(p:Problem)
             RETURN count(r) AS cnt
         """, {'name': topic_name})
-        if result:
-            return result[0].get('cnt', 0)
+        if result and result[0].get('cnt', 0) > 0:
+            return result[0]['cnt']
     except Exception:
         pass
+
+    # 策略2：通过 ProblemTag 名称多层匹配查 PostgreSQL
+    try:
+        from problem.models import Problem
+        tag_names = _get_matching_tag_names(topic_name)
+        if tag_names:
+            count = Problem.objects.filter(
+                tags__name__in=tag_names,
+                visible=True,
+                contest__isnull=True
+            ).count()
+            if count > 0:
+                return count
+    except Exception:
+        pass
+
     return 0
+
+
+def _get_representative_problems(topic_name: str, limit: int = 3) -> list:
+    """获取某个知识点的代表性题目（标题+ID）"""
+    try:
+        from problem.models import Problem
+
+        # 先尝试通过匹配的标签名查
+        tag_names = _get_matching_tag_names(topic_name)
+        qs = Problem.objects.filter(visible=True, contest__isnull=True)
+        if tag_names:
+            qs = qs.filter(tags__name__in=tag_names)
+        else:
+            # 没有匹配标签，返回空
+            return []
+
+        problems = qs.order_by('-submission_number')[:limit]
+        return [{
+            '_id': p._id,
+            'id': p.id,
+            'title': p.title,
+            'difficulty': p.difficulty,
+        } for p in problems]
+    except Exception:
+        return []
 
 
 def _search_rag_snippets(topic_name: str) -> str:
@@ -193,6 +380,7 @@ class PathPlanningAgent(BaseAgent):
                 'difficulty': _safe_float(node.get('difficulty'), 3.0),
                 'importance': _safe_float(node.get('importance'), 3.0),
                 'problem_count': _get_problem_count(name),
+                'problems': _get_representative_problems(name, limit=3),
                 'snippet': _search_rag_snippets(name),
             })
 
