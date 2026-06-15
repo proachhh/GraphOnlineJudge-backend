@@ -158,7 +158,6 @@ if __name__ == '__main__':
     parser.add_argument('--epochs-rank', type=int, default=30, help='精排模型训练轮数')
     parser.add_argument('--epochs-transe', type=int, default=150, help='TransE 训练轮数')
     parser.add_argument('--epochs-rgcn', type=int, default=100, help='RGCN 训练轮数')
-    parser.add_argument('--epochs-dqn', type=int, default=1000, help='DQN 训练episodes数')
     parser.add_argument('--summary', action='store_true', help='显示已训练的模型摘要')
 
     args = parser.parse_args()
@@ -173,5 +172,4 @@ if __name__ == '__main__':
             epochs_rank=args.epochs_rank,
             epochs_transe=args.epochs_transe,
             epochs_rgcn=args.epochs_rgcn,
-            epochs_dqn=args.epochs_dqn,
         )
