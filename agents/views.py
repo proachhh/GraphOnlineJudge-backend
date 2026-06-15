@@ -10,6 +10,23 @@ from agents.profile_agent import ONBOARDING_DIMENSION_ORDER
 logger = logging.getLogger(__name__)
 
 
+def _get_safe_encoder():
+    from django.core.serializers.json import DjangoJSONEncoder
+    class SafeEncoder(DjangoJSONEncoder):
+        def default(self, obj):
+            try:
+                import numpy as np
+                if isinstance(obj, (np.integer,)):
+                    return int(obj)
+                if isinstance(obj, (np.floating,)):
+                    return float(obj)
+                if isinstance(obj, np.ndarray):
+                    return obj.tolist()
+            except ImportError:
+                pass
+            return super().default(obj)
+    return SafeEncoder
+
 def _check_login(request):
     if not request.user.is_authenticated:
         return None
@@ -57,7 +74,7 @@ def agent_chat(request):
         return JsonResponse({
             'success': True,
             'data': result,
-        })
+        }, encoder=_get_safe_encoder())
     except Exception as e:
         logger.exception(f"MasterAgent handle_message failed")
         return JsonResponse({
@@ -140,7 +157,7 @@ def profile_init(request):
         return JsonResponse({
             'success': True,
             'data': result,
-        })
+        }, encoder=_get_safe_encoder())
     except Exception as e:
         logger.exception(f"Profile init failed")
         return JsonResponse({
@@ -174,7 +191,7 @@ def agent_recommend(request):
             return JsonResponse({
                 'recommendations': result.get('recommendations', []),
                 'total': result.get('total', 0),
-            })
+            }, encoder=_get_safe_encoder())
         else:
             return JsonResponse({'error': result.get('error', '推荐失败')}, status=500)
     except Exception as e:
@@ -219,7 +236,7 @@ def agent_chat_stream(request):
         extra_context['submission_id'] = submission_id
 
     def sse_event(event_type, data):
-        return f"data: {json.dumps({'event': event_type, **data}, ensure_ascii=False)}\n\n"
+        return f"data: {json.dumps({'event': event_type, **data}, ensure_ascii=False, cls=_get_safe_encoder())}\n\n"
 
     def event_stream():
         # 1. 先做意图分类（不调 LLM），发送思考步骤
@@ -335,7 +352,7 @@ def agent_immersion(request):
                 'problems': result.get('recommendations', []),
                 'total': len(result.get('recommendations', [])),
                 'current_index': offset,
-            })
+            }, encoder=_get_safe_encoder())
         else:
             return JsonResponse({'error': result.get('error', '推荐失败')}, status=500)
     except Exception as e:
@@ -367,7 +384,7 @@ def agent_learning_path(request):
             context['target_topic'] = target_topic
         result = agent.run(context)
         if result.get('success'):
-            return JsonResponse(result)
+            return JsonResponse(result, encoder=_get_safe_encoder())
         else:
             return JsonResponse({'error': result.get('error', '路径规划失败')}, status=500)
     except Exception as e:
