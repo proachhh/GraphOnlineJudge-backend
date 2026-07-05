@@ -47,12 +47,11 @@ class FMBlock(nn.Module):
 
 
 class CINBlock(nn.Module):
-    """xDeepFM CIN block - fixed dimension handling"""
+    """xDeepFM CIN — 3D input, simple broadcasting, no expand trick"""
     def __init__(self, num_fields, layer_dims=(128, 128)):
         super().__init__()
-        self.num_fields = num_fields
+        prev_h = num_fields  # H_0 = F
         self.conv_layers = nn.ModuleList()
-        prev_h = num_fields
         for dim in layer_dims:
             self.conv_layers.append(
                 nn.Conv1d(in_channels=prev_h * num_fields, out_channels=dim, kernel_size=1)
@@ -60,34 +59,22 @@ class CINBlock(nn.Module):
             prev_h = dim
 
     def forward(self, x_embedded):
-        # x_embedded: [B, num_fields, embed_dim]
-        batch_size, num_fields, embed_dim = x_embedded.shape
-        # x0: [B, num_fields, num_fields, embed_dim] - pairwise interaction base
-        x0 = x_embedded.unsqueeze(1).expand(-1, num_fields, -1, -1)
-        # xk: [B, 1, num_fields, embed_dim] — first "hidden" layer is just x_embedded
-        xk = x_embedded.unsqueeze(1)
-        results = [xk.sum(dim=2).squeeze(2)]  # [B, embed_dim]
+        # x_embedded: [B, nf, D]
+        B, nf, D = x_embedded.shape
+        x0 = x_embedded                # [B, nf, D]
+        xk = x_embedded                # [B, H_0=nf, D]
+        results = [xk.sum(dim=1)]      # [B, D]
 
         for conv in self.conv_layers:
-            # xk: [B, Hk, num_fields, embed_dim], x0: [B, num_fields, num_fields, embed_dim]
-            # Expand xk along dim=2 to match x0's dim=1
-            xk_expanded = xk.unsqueeze(2).expand(-1, -1, num_fields, -1, -1)
-            # xk_expanded: [B, Hk, num_fields, num_fields, embed_dim]
-            # x0: [B, num_fields, num_fields, embed_dim] -> unsqueeze(1): [B, 1, num_fields, num_fields, embed_dim]
-            x0_expanded = x0.unsqueeze(1)
-            # interaction: [B, Hk, num_fields, num_fields, embed_dim]
-            interaction = xk_expanded * x0_expanded
-            # Reshape to [B, Hk * num_fields, num_fields * embed_dim] for Conv1d
-            Hk = xk.size(1)
-            interaction = interaction.permute(0, 1, 3, 2, 4).contiguous()
-            interaction = interaction.view(batch_size, Hk * num_fields, num_fields * embed_dim)
-            xk = conv(interaction)  # [B, out_dim, num_fields * embed_dim]
+            # Interaction: z[h,f] = xk_h ⊙ x0_f  →  [B, H_k, nf, D]
+            z = xk.unsqueeze(2) * x0.unsqueeze(1)
+            H_k = z.size(1)
+            z = z.reshape(B, H_k * nf, D)  # [B, H_k*nf, D]
+            xk = conv(z)                   # [B, H_{k+1}, D]
             xk = F.relu(xk)
-            # Reshape to [B, out_dim, num_fields, embed_dim]
-            xk = xk.view(batch_size, -1, num_fields, embed_dim)
-            results.append(xk.sum(dim=2).squeeze(2))  # [B, embed_dim]
+            results.append(xk.sum(dim=1))  # [B, D]
 
-        return torch.cat(results, dim=-1)
+        return torch.cat(results, dim=1)   # [B, (L+1)*D]
 
 
 class DeepFM(nn.Module):
@@ -163,7 +150,7 @@ class xDeepFM(nn.Module):
         self.fm = FMBlock(self.total_fields * embed_dim, embed_dim)
 
         self.cin = CINBlock(self.total_fields, cin_dims)
-        cin_out_dim = self.total_fields * embed_dim + sum(cin_dims)
+        cin_out_dim = (len(cin_dims) + 1) * embed_dim
 
         dnn_input_dim = self.total_fields * embed_dim
         dnn_layers = []

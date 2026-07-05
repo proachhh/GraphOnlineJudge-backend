@@ -15,8 +15,8 @@ def _get_fusion_engine():
         return _fusion_engine
     try:
         import os
-        from django.conf import settings
-        model_dir = os.path.join(str(settings.BASE_DIR), 'recommend_models')
+        model_dir = '/data/recommend_models'
+        os.makedirs(model_dir, exist_ok=True)
         from recommend.multi_modal_fusion import MultiModalFusionEngine
         _fusion_engine = MultiModalFusionEngine(model_dir)
         logger.info("多模态融合引擎初始化成功")

@@ -68,6 +68,11 @@ def train_all(models='all', epochs_gnn=60, epochs_seq=30, epochs_rank=30,
         logger.info("开始训练: 旧版 MLP 模型 (SimpleRecommender) - fallback")
         logger.info("=" * 60)
         try:
+            # 先导出数据
+            if not os.path.exists('/data/recommend_data.pkl'):
+                import recommend.data_export
+                recommend.data_export.export()
+                logger.info("数据导出完成")
             from recommend.train import train
             train()
             logger.info("旧版 MLP 模型训练完成!")
