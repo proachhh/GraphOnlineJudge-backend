@@ -42,7 +42,7 @@ def export():
     X_test = [X[i] for i in indices[split:]]
     y_test = [y[i] for i in indices[split:]]
     
-    with open('recommend_data.pkl', 'wb') as f:
+    with open('/data/recommend_data.pkl', 'wb') as f:
         pickle.dump({
             'X_train': X_train, 'y_train': y_train,
             'X_test': X_test, 'y_test': y_test,

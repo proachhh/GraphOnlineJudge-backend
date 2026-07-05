@@ -78,7 +78,7 @@ chown -R www-data:www-data /tmp/nginx
 # ---------- database migration ----------
 n=0
 while [ $n -lt 5 ]; do
-    if python manage.py migrate --no-input &&
+    if python manage.py migrate --no-input --fake-initial &&
        python manage.py inituser --username=root --password=rootroot --action=create_super_admin &&
        echo "from options.options import SysOptions; SysOptions.judge_server_token='$JUDGE_SERVER_TOKEN'" | python manage.py shell &&
        echo "from conf.models import JudgeServer; JudgeServer.objects.update(task_number=0)" | python manage.py shell

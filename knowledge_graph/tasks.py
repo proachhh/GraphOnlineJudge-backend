@@ -123,7 +123,7 @@ def apply_rgcn_prerequisites(confidence_threshold=0.7):
     import os
     from django.conf import settings
 
-    model_dir = os.path.join(str(settings.BASE_DIR), 'recommend_models')
+    model_dir = '/data/recommend_models'
     model_path = os.path.join(model_dir, 'rgcn.pt')
 
     if not os.path.exists(model_path):
@@ -174,7 +174,7 @@ def apply_transe_link_prediction(top_k=15):
     import os
     from django.conf import settings
 
-    model_dir = os.path.join(str(settings.BASE_DIR), 'recommend_models')
+    model_dir = '/data/recommend_models'
     model_path = os.path.join(model_dir, 'transe.pt')
 
     if not os.path.exists(model_path):

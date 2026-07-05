@@ -24,7 +24,7 @@ def roc_auc(y_true, y_pred):
     return auc_val / (pos * neg)
 
 def train():
-    with open('recommend_data.pkl', 'rb') as f:
+    with open('/data/recommend_data.pkl', 'rb') as f:
         data = pickle.load(f)
     
     X_train = data['X_train']
@@ -70,7 +70,7 @@ def train():
                 auc = roc_auc(test_y.numpy(), pred_test)
                 print(f"  Test AUC: {auc:.4f}")
     
-    torch.save(model.state_dict(), 'recommend_model.pt')
+    torch.save(model.state_dict(), '/data/recommend_model.pt')
     print("模型已保存")
 
 if __name__ == '__main__':

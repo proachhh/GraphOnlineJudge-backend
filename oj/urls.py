@@ -32,6 +32,7 @@ urlpatterns = [
     path('api/knowledge-graph/', knowledge_graph_overview, name='knowledge_graph_overview'),
     url(r"^api/", include("lesson_plan.urls.oj")),
     url(r"^api/admin/", include("lesson_plan.urls.admin")),
+    url(r"^api/", include("forum.urls")),
     url(r"^api/admin/", include("dashboard.urls")),
     url(r"^public/(?P<path>.*)$", serve, {"document_root": settings.UPLOAD_DIR}),
 ]

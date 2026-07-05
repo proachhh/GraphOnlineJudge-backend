@@ -26,7 +26,7 @@ class FusionResult:
 
 
 class MultiModalFusionEngine:
-    def __init__(self, model_dir='recommend_models'):
+    def __init__(self, model_dir='/data/recommend_models'):
         self.model_dir = model_dir
 
         self.gnn_embeddings = None
@@ -68,8 +68,8 @@ class MultiModalFusionEngine:
         try:
             import torch
             import pickle
-            model_path = os.path.join(self.model_dir, '..', 'recommend_model.pt')
-            data_path = os.path.join(self.model_dir, '..', 'recommend_data.pkl')
+            model_path = '/data/recommend_model.pt'
+            data_path = '/data/recommend_data.pkl'
             if os.path.exists(model_path) and os.path.exists(data_path):
                 from recommend.model import SimpleRecommender
                 with open(data_path, 'rb') as f:
@@ -198,7 +198,7 @@ class MultiModalFusionEngine:
 _engine_instance = None
 
 
-def get_fusion_engine(model_dir='recommend_models') -> MultiModalFusionEngine:
+def get_fusion_engine(model_dir='/data/recommend_models') -> MultiModalFusionEngine:
     global _engine_instance
     if _engine_instance is None:
         _engine_instance = MultiModalFusionEngine(model_dir)

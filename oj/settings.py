@@ -59,6 +59,7 @@ LOCAL_APPS = [
     'learning_stats',
     'knowledge_graph',
     'lesson_plan',
+    'forum',
     'dashboard',
     'feedback',
 ]

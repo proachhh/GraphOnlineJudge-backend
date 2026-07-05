@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 def train_all(models='all', epochs_gnn=60, epochs_seq=30, epochs_rank=30,
               epochs_transe=150, epochs_rgcn=100):
-    model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'recommend_models')
+    model_dir = '/data/recommend_models'
     os.makedirs(model_dir, exist_ok=True)
 
     if models in ('all', 'gnn'):
@@ -105,7 +105,7 @@ def train_all(models='all', epochs_gnn=60, epochs_seq=30, epochs_rank=30,
 
 
 def print_model_summary():
-    model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'recommend_models')
+    model_dir = '/data/recommend_models'
     legacy_dir = os.path.dirname(os.path.abspath(__file__))
 
     files = []
