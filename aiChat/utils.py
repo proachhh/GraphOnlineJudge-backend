@@ -47,7 +47,7 @@ def ask_deepseek(prompt: str) -> str:
     try:
         client = get_deepseek_client()
         response = client.chat.completions.create(
-            model="deepseek-v4-pro",
+            model="deepseek-v4-flash",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant"},
                 {"role": "user", "content": prompt},
@@ -82,7 +82,7 @@ def ask_deepseek_stream(prompt: str):
     try:
         client = get_deepseek_client()
         response = client.chat.completions.create(
-            model="deepseek-v4-pro",
+            model="deepseek-v4-flash",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant"},
                 {"role": "user", "content": prompt},

@@ -3,7 +3,7 @@ from django.urls import path
 from django.conf import settings
 from django.views.static import serve
 
-from learning_stats.views import learning_stats, learning_trend, knowledge_graph_overview
+from learning_stats.views import learning_stats, learning_trend, knowledge_graph_overview, knowledge_universe, topic_problems, topic_neighbors
 
 from django.conf import settings
 from django.conf.urls.static import static
@@ -30,6 +30,9 @@ urlpatterns = [
     path('api/learning-stats/', learning_stats, name='learning_stats'),
     path('api/learning-trend/', learning_trend, name='learning-trend'),
     path('api/knowledge-graph/', knowledge_graph_overview, name='knowledge_graph_overview'),
+    path('api/knowledge-universe/', knowledge_universe, name='knowledge_universe'),
+    path('api/topic-problems/', topic_problems, name='topic_problems'),
+    path('api/topic-neighbors/', topic_neighbors, name='topic_neighbors'),
     url(r"^api/", include("lesson_plan.urls.oj")),
     url(r"^api/admin/", include("lesson_plan.urls.admin")),
     url(r"^api/", include("forum.urls")),

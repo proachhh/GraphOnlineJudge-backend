@@ -246,7 +246,30 @@ def agent_chat_stream(request):
             yield sse_event('step', {'text': step})
             time.sleep(0.3)
 
-        # 2. 调 handle_message 获取完整结果（内部调 ask_ai 非流式）
+        forced_agent = extra_context.get('agent_type', '')
+
+        # 2a. 通用对话（无指定 agent 且 intent=general）：真流式调用 LLM
+        if not forced_agent and intent == 'general':
+            yield sse_event('step', {'text': '正在生成回答...'})
+            full_text = ''
+            try:
+                for chunk in master_agent.stream_fallback_llm(user_id or 0, user_message):
+                    full_text += chunk
+                    yield sse_event('chunk', {'text': chunk})
+            except Exception as e:
+                logger.exception("stream_fallback_llm failed")
+                if not full_text:
+                    full_text = f'抱歉，生成回答时出错：{e}'
+                    yield sse_event('chunk', {'text': full_text})
+            yield sse_event('done', {})
+            yield sse_event('result', {'data': {
+                'agent': 'LLM',
+                'intent': 'general',
+                'message': full_text,
+            }})
+            return
+
+        # 2b. 特定 agent：调 handle_message 获取完整结果（内部调 ask_ai 非流式）
         result = master_agent.handle_message(user_id or 0, user_message, extra_context)
 
         # 如果 result 里也有 thinking_steps 但没有预设的，补上
@@ -256,10 +279,9 @@ def agent_chat_stream(request):
         yield sse_event('done', {})
         time.sleep(0.1)
 
-        # 3. 提取文本内容，模拟流式逐字发送
+        # 3. 提取文本内容，逐块发送（agent 结果含结构化数据，前端会用 result 事件替换为卡片）
         text = _get_result_text(result)
         if text:
-            # 按句子/段落拆分成块，模拟真实流式输出
             import re
             chunks = _split_for_stream(text)
             for chunk in chunks:

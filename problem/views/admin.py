@@ -1,10 +1,13 @@
 import hashlib
 import json
+import logging
 import os
 # import shutil
 import tempfile
 import zipfile
 from wsgiref.util import FileWrapper
+
+logger = logging.getLogger(__name__)
 
 from django.conf import settings
 from django.db import transaction
@@ -810,24 +813,31 @@ class ProblemGenerateWithAIAPI(APIView):
         return self.success(generated)
 
 
-class MatchProblemTagsAPI(APIView):
-    @problem_permission_required
-    def post(self, request):
-        title = request.data.get("title", "")
-        description = request.data.get("description", "")
-        input_description = request.data.get("input_description", "")
-        output_description = request.data.get("output_description", "")
+def _get_topic_candidates():
+    """获取教案知识点候选集（LessonPlan.title），即 Neo4j Topic 节点的中文名。
+    AI 生成的标签必须严格取自该集合，才能让题目挂载到教案知识点体系。"""
+    from lesson_plan.models import LessonPlan
+    seen = set()
+    candidates = []
+    for name in LessonPlan.objects.exclude(title__in=['测试', '']).values_list("title", flat=True):
+        name = (name or '').strip()
+        if name and name not in seen:
+            seen.add(name)
+            candidates.append(name)
+    return candidates
 
-        from problem.models import ProblemTag
-        existing_tags = list(ProblemTag.objects.values_list("name", flat=True))
-        if not existing_tags:
-            return self.success({"tags": [], "message": "数据库暂无标签，请先创建"})
 
-        tags_str = "\n".join([f"- {t}" for t in existing_tags])
+def auto_match_problem_tags(title, description, input_description, output_description):
+    """用 LLM 从教案知识点中为题目匹配 2-5 个标签，返回标签名列表。
+    导入 LOJ 题目时调用此函数替换原站英文标签，使题目挂载到教案知识点体系。"""
+    existing_tags = _get_topic_candidates()
+    if not existing_tags:
+        return []
 
-        prompt = f"""你是一个编程题库智能标签助手。请根据以下题目信息，从数据库已有的标签列表中选择最合适的标签。
+    tags_str = "\n".join([f"- {t}" for t in existing_tags])
+    prompt = f"""你是一个编程题库智能标签助手。请根据以下题目信息，从给定的知识点列表中选择最合适的 2-5 个知识点作为标签。
 
-【数据库已有标签】
+【知识点列表】（必须严格从此列表中选取，不得编造列表外的标签）
 {tags_str}
 
 【题目信息】
@@ -836,9 +846,62 @@ class MatchProblemTagsAPI(APIView):
 输入说明：{input_description[:500]}
 输出说明：{output_description[:500]}
 
-请严格从上述数据库已有标签中选出 2-5 个最匹配的标签，以 JSON 数组格式返回。
-只能返回 JSON 数组，不要包含任何其他文字。
-如果没有任何标签匹配，返回空数组 []。
+要求：
+1. 只能从上面的【知识点列表】中选择，不得新增或翻译列表外的名称
+2. 选 2-5 个最匹配的知识点
+3. 仅返回 JSON 数组，不要包含任何其他文字或解释
+4. 如果没有知识点匹配，返回空数组 []
+
+示例返回：["动态规划", "背包问题", "贪心"]"""
+
+    try:
+        from aiChat.utils import ask_ai
+        raw_response = ask_ai(prompt)
+    except Exception:
+        return []
+
+    import re
+    raw_response = re.sub(r'心智.*?```', '', raw_response, flags=re.DOTALL).strip()
+    json_match = re.search(r'\[.*\]', raw_response, re.DOTALL)
+    if not json_match:
+        return []
+    try:
+        matched = json.loads(json_match.group())
+    except json.JSONDecodeError:
+        return []
+    return [t for t in matched if isinstance(t, str) and t in existing_tags]
+
+
+class MatchProblemTagsAPI(APIView):
+    @problem_permission_required
+    def post(self, request):
+        title = request.data.get("title", "")
+        description = request.data.get("description", "")
+        input_description = request.data.get("input_description", "")
+        output_description = request.data.get("output_description", "")
+
+        existing_tags = _get_topic_candidates()
+        if not existing_tags:
+            return self.success({"tags": [], "message": "数据库暂无教案知识点，请先导入教案"})
+
+        tags_str = "\n".join([f"- {t}" for t in existing_tags])
+
+        prompt = f"""你是一个编程题库智能标签助手。请根据以下题目信息，从给定的知识点列表中选择最合适的 2-5 个知识点作为标签。
+
+【知识点列表】（必须严格从此列表中选取，不得编造列表外的标签）
+{tags_str}
+
+【题目信息】
+标题：{title}
+题目描述：{description[:1500]}
+输入说明：{input_description[:500]}
+输出说明：{output_description[:500]}
+
+要求：
+1. 只能从上面的【知识点列表】中选择，不得新增或翻译列表外的名称
+2. 选 2-5 个最匹配的知识点
+3. 仅返回 JSON 数组，不要包含任何其他文字或解释
+4. 如果没有知识点匹配，返回空数组 []
 
 示例返回：["动态规划", "背包问题", "贪心"]"""
 
@@ -895,4 +958,155 @@ class ParseLojJsonAPI(APIView):
             return self.error(f'数据解析失败：{str(e)}')
 
         return self.success(data)
+
+
+class FetchLojProblemAPI(APIView):
+    """直接从 LOJ API 获取题目元数据（服务器端请求，无需手动 curl）。
+    仅抓取题目信息，不下载测试点——测试点由 FetchLojTestcasesAPI 单独获取，
+    以便前端分阶段显示进度（先“获取题目信息”，再“下载测试点”）。"""
+    @problem_permission_required
+    def post(self, request):
+        url = (request.data.get('url') or '').strip()
+        if not url:
+            return self.error('请输入题目链接')
+
+        from problem.utils.scraper import parse_loj_url, fetch_loj_problem, parse_loj_api_json
+        try:
+            info = parse_loj_url(url)
+            problem_id = info['problem_id']
+            raw = fetch_loj_problem(problem_id)
+            data = parse_loj_api_json(raw)
+            # 用 AI 从数据库已有标签匹配，替换 LOJ 原站英文标签
+            data['tags'] = auto_match_problem_tags(
+                data.get('title', ''), data.get('description', ''),
+                data.get('input_description', ''), data.get('output_description', ''))
+            return self.success(data)
+        except ValueError as e:
+            return self.error(str(e))
+        except Exception as e:
+            logger.exception("LOJ fetch failed")
+            return self.error(f'获取题目失败：{str(e)}')
+
+
+class FetchLojTestcasesAPI(APIView, TestCaseZipProcessor):
+    """下载 LOJ 题目的测试点并处理，返回与 TestCaseAPI 一致的 {id, info, spj}。
+    供前端在已获取题目元数据后单独请求，实现分阶段进度提示。
+    任何失败都以 success + testcase_error 返回（不抛 500），便于前端给出明确提示。"""
+    @problem_permission_required
+    def post(self, request):
+        url = (request.data.get('url') or '').strip()
+        if not url:
+            return self.error('请输入题目链接')
+
+        from problem.utils.scraper import parse_loj_url, fetch_loj_testcases
+        try:
+            info = parse_loj_url(url)
+            problem_id = info['problem_id']
+        except ValueError as e:
+            return self.error(str(e))
+
+        try:
+            zip_path = fetch_loj_testcases(problem_id)
+            if not zip_path or not os.path.isfile(zip_path):
+                return self.success({'testcase_count': 0,
+                                     'testcase_error': '该题目未提供可下载的测试点文件，请手动上传'})
+            test_case_score, test_case_id = self.process_zip(zip_path, spj=False)
+            os.remove(zip_path)
+            return self.success({
+                'test_case_id': test_case_id,
+                'test_case_score': test_case_score,
+                'testcase_count': len(test_case_score),
+                'spj': False,
+            })
+        except APIError as e:
+            return self.success({'testcase_count': 0,
+                                 'testcase_error': f'测试点解析失败：{e.msg}'})
+        except Exception as e:
+            logger.warning("LOJ testcases download failed for %s: %s", problem_id, e, exc_info=True)
+            return self.success({'testcase_count': 0,
+                                 'testcase_error': f'测试点下载失败：{str(e)}'})
+
+
+class ImportLojProblemAPI(APIView, TestCaseZipProcessor):
+    """从 LOJ 获取题目并直接导入到本 OJ（含测试点）"""
+    @problem_permission_required
+    @transaction.atomic
+    def post(self, request):
+        url = (request.data.get('url') or '').strip()
+        if not url:
+            return self.error('请输入题目链接')
+
+        from problem.utils.scraper import parse_loj_url, fetch_loj_problem, parse_loj_api_json, fetch_loj_testcases
+        try:
+            info = parse_loj_url(url)
+            problem_id = info['problem_id']
+            raw = fetch_loj_problem(problem_id)
+            data = parse_loj_api_json(raw)
+        except ValueError as e:
+            return self.error(str(e))
+        except Exception as e:
+            logger.exception("LOJ fetch failed")
+            return self.error(f'获取题目失败：{str(e)}')
+
+        # 使用 LOJ 原始题号作为 display_id
+        display_id = str(data.get("problem_id", problem_id))
+        if Problem.objects.filter(_id=display_id, contest_id__isnull=True).exists():
+            return self.error(f'题目 {display_id} 已存在')
+
+        # 下载测试点
+        test_case_id = ''
+        test_case_score = []
+        testcase_count = 0
+        try:
+            zip_path = fetch_loj_testcases(problem_id)
+            if zip_path and os.path.isfile(zip_path):
+                test_case_score, test_case_id = self.process_zip(zip_path, spj=False)
+                testcase_count = len(test_case_score)
+                os.remove(zip_path)
+        except APIError as e:
+            logger.warning("LOJ testcases parse failed for %s: %s", problem_id, e.msg)
+        except Exception as e:
+            logger.warning("LOJ testcases download failed for %s: %s", problem_id, e, exc_info=True)
+
+        # 创建题目
+        problem = Problem.objects.create(
+            _id=display_id,
+            title=data['title'][:255] if data['title'] else f'LOJ #{problem_id}',
+            description=data['description'] or '',
+            input_description=data['input_description'] or '',
+            output_description=data['output_description'] or '',
+            samples=data['samples'],
+            test_case_id=test_case_id,
+            test_case_score=test_case_score,
+            hint=data['hint'] or '',
+            languages=list(SysOptions.language_names.keys()),
+            template={},
+            created_by=request.user,
+            time_limit=data.get('time_limit', 1000),
+            memory_limit=data.get('memory_limit', 256),
+            spj=False,
+            rule_type=ProblemRuleType.ACM,
+            visible=True,
+            difficulty=data.get('difficulty', 'Mid'),
+            source=f'LOJ #{problem_id}',
+        )
+
+        # 用 AI 从数据库已有标签匹配（不导入 LOJ 原站英文标签）
+        for tag_name in auto_match_problem_tags(
+                data.get('title', ''), data.get('description', ''),
+                data.get('input_description', ''), data.get('output_description', '')):
+            tag, _ = ProblemTag.objects.get_or_create(name=tag_name)
+            problem.tags.add(tag)
+
+        # 同步到 Neo4j
+        from submission.tasks import sync_problem_to_neo4j
+        sync_problem_to_neo4j.send(problem.id)
+
+        return self.success({
+            'id': problem.id,
+            '_id': problem._id,
+            'title': problem.title,
+            'testcase_count': testcase_count,
+            'imported': True,
+        })
 

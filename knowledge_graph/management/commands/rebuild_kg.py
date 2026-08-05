@@ -53,7 +53,29 @@ def parse_filenames_to_topics(directory: str) -> list:
     return topics
 
 
+def read_lesson_plans_from_db() -> list:
+    """从数据库 lesson_plan 表读取教案（content 为 Markdown），返回与 parse_filenames_to_topics 同构的列表"""
+    from lesson_plan.models import LessonPlan
+    topics = []
+    for lp in LessonPlan.objects.all():
+        name = (lp.title or '').strip()
+        name = re.sub(r'^##\s*', '', name)
+        name = re.sub(r'\.md$', '', name).strip()
+        if not name or name.startswith('教案'):
+            continue
+        topics.append({
+            'name': name,
+            'filename': f'{name}.md',
+            'filepath': None,
+            'content': lp.content or '',
+            'source_file': f'db:lesson_plan:{lp.id}',
+        })
+    return topics
+
+
 def read_file_content(filepath: str) -> str:
+    if not filepath:
+        return ''
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             return f.read()
@@ -189,73 +211,101 @@ class Command(BaseCommand):
             '--full', action='store_true', default=False,
             help='清除所有节点重建 (含 User/Problem/Submission)，默认仅清除 Topic'
         )
+        parser.add_argument(
+            '--from-db', action='store_true', default=False,
+            help='从数据库 lesson_plan 表读取教案 (而非 /teach 磁盘文件)'
+        )
+        parser.add_argument(
+            '--incremental', action='store_true', default=False,
+            help='增量模式：MERGE Topic 节点，不删除已有数据，可反复执行'
+        )
 
     def handle(self, *args, **options):
         teach_dir = options['teach_dir']
         schema_only = options['schema_only']
         full = options['full']
+        from_db = options['from_db']
+        incremental = options['incremental']
         client = neo4j_client
 
         # =============================================
-        # 1. 清除旧的图数据
+        # 1. 读取教案数据（数据库 or 磁盘文件）
         # =============================================
-        if full:
-            self.stdout.write(self.style.WARNING('清除所有节点及关系...'))
-            try:
-                client.run_query("MATCH (n) DETACH DELETE n")
-                self.stdout.write(self.style.SUCCESS('已清除所有节点及关系'))
-            except Exception as e:
-                self.stderr.write(f'清除节点失败: {e}')
+        if from_db:
+            all_topics_data = read_lesson_plans_from_db()
+            self.stdout.write(f'从数据库 lesson_plan 表读取 {len(all_topics_data)} 份教案')
         else:
-            self.stdout.write(self.style.WARNING('清除旧的 Topic 节点及相关关系...'))
-            try:
-                client.run_query("MATCH (t:Topic) DETACH DELETE t")
-                self.stdout.write(self.style.SUCCESS('已清除所有 Topic 节点'))
-            except Exception as e:
-                self.stderr.write(f'清除 Topic 节点失败: {e}')
-
-        # =============================================
-        # 2. 从教案创建 Topic 节点
-        # =============================================
-        all_topics_data = parse_filenames_to_topics(teach_dir)
+            all_topics_data = parse_filenames_to_topics(teach_dir)
+            self.stdout.write(f'从 {teach_dir} 读取 {len(all_topics_data)} 份教案')
 
         if not all_topics_data:
-            self.stderr.write(self.style.ERROR(f'教案目录 {teach_dir} 未找到 .md 文件'))
+            self.stderr.write(self.style.ERROR('未找到任何教案'))
             return
 
-        self.stdout.write(f'发现 {len(all_topics_data)} 个教案文件')
+        topic_names = set(td['name'] for td in all_topics_data)
 
-        topic_names = set()
-        for td in all_topics_data:
-            topic_names.add(td['name'])
+        if incremental:
+            # 增量模式：MERGE Topic，不删除已有数据
+            self.stdout.write(self.style.WARNING('增量模式：MERGE Topic 节点（保留已有数据）...'))
+            for td in all_topics_data:
+                name = td['name']
+                content = td.get('content') or read_file_content(td.get('filepath'))
+                difficulty = parse_complexity_from_content(content)
+                importance = parse_importance(name)
+                client.run_query(
+                    """
+                    MERGE (t:Topic {name: $name})
+                    SET t.difficulty = $difficulty,
+                        t.importance = $importance,
+                        t.source_file = $source_file
+                    """,
+                    {
+                        'name': name,
+                        'difficulty': str(difficulty),
+                        'importance': str(importance),
+                        'source_file': td['source_file'],
+                    }
+                )
+            self.stdout.write(self.style.SUCCESS(f'已 MERGE {len(all_topics_data)} 个 Topic 节点'))
+        else:
+            # 全量重建：清除旧 Topic 再 CREATE
+            if full:
+                self.stdout.write(self.style.WARNING('清除所有节点及关系...'))
+                try:
+                    client.run_query("MATCH (n) DETACH DELETE n")
+                    self.stdout.write(self.style.SUCCESS('已清除所有节点及关系'))
+                except Exception as e:
+                    self.stderr.write(f'清除节点失败: {e}')
+            else:
+                self.stdout.write(self.style.WARNING('清除旧的 Topic 节点及相关关系...'))
+                try:
+                    client.run_query("MATCH (t:Topic) DETACH DELETE t")
+                    self.stdout.write(self.style.SUCCESS('已清除所有 Topic 节点'))
+                except Exception as e:
+                    self.stderr.write(f'清除 Topic 节点失败: {e}')
 
-        for td in all_topics_data:
-            name = td['name']
-            content = read_file_content(td['filepath'])
-
-            difficulty = parse_complexity_from_content(content)
-            importance = parse_importance(name)
-
-            client.run_query(
-                """
-                CREATE (t:Topic {
-                    name: $name,
-                    difficulty: $difficulty,
-                    importance: $importance,
-                    source_file: $source_file
-                })
-                """,
-                {
-                    'name': name,
-                    'difficulty': str(difficulty),
-                    'importance': str(importance),
-                    'source_file': td['filename'],
-                }
-            )
-
-        self.stdout.write(
-            self.style.SUCCESS(f'已创建 {len(all_topics_data)} 个 Topic 节点')
-        )
+            for td in all_topics_data:
+                name = td['name']
+                content = td.get('content') or read_file_content(td.get('filepath'))
+                difficulty = parse_complexity_from_content(content)
+                importance = parse_importance(name)
+                client.run_query(
+                    """
+                    CREATE (t:Topic {
+                        name: $name,
+                        difficulty: $difficulty,
+                        importance: $importance,
+                        source_file: $source_file
+                    })
+                    """,
+                    {
+                        'name': name,
+                        'difficulty': str(difficulty),
+                        'importance': str(importance),
+                        'source_file': td['filename'],
+                    }
+                )
+            self.stdout.write(self.style.SUCCESS(f'已创建 {len(all_topics_data)} 个 Topic 节点'))
 
         # =============================================
         # 3. 构建 PREREQUISITE_OF 关系
@@ -267,7 +317,7 @@ class Command(BaseCommand):
 
         for td in all_topics_data:
             name = td['name']
-            content = read_file_content(td['filepath'])
+            content = td.get('content') or read_file_content(td.get('filepath'))
             rels = parse_relationships(content)
 
             for prereq_name in rels['prerequisites']:

@@ -251,30 +251,7 @@ class MasterAgent:
         try:
             from aiChat.utils import ask_ai
 
-            profile_summary = ''
-            if user_id > 0:
-                profile = self.get_clean_user_profile(user_id) or {}
-                strengths = profile.get('strength_topics', [])
-                weaks = profile.get('weak_topics', [])
-                goals = profile.get('learning_goals', '')
-                parts = []
-                if strengths:
-                    parts.append(f"强项: {', '.join(strengths)}")
-                if weaks:
-                    parts.append(f"弱项: {', '.join(weaks)}")
-                if goals:
-                    parts.append(f"学习目标: {goals}")
-                if parts:
-                    profile_summary = '\n'.join(parts)
-                else:
-                    profile_summary = ''
-
-            prompt_parts = ['你是一个专业的编程竞赛辅导助手，服务于一个在线判题系统（OJ）的学生用户。']
-            if profile_summary:
-                prompt_parts.append(f'\n学生画像:\n{profile_summary}')
-            prompt_parts.append(f'\n学生的问题：{message}')
-            prompt_parts.append('\n请给出有帮助的、结构清晰的回答。如果问题与编程无关，可以自由回答。')
-            prompt = '\n'.join(prompt_parts)
+            prompt = self._build_fallback_prompt(user_id, message)
             answer = ask_ai(prompt)
             return {
                 'agent': 'LLM',
@@ -285,6 +262,38 @@ class MasterAgent:
         except Exception:
             logger.exception("LLM fallback failed")
             return None
+
+    def _build_fallback_prompt(self, user_id: int, message: str) -> str:
+        """构建通用对话 prompt（含用户画像），供同步/流式 fallback 复用"""
+        profile_summary = ''
+        if user_id > 0:
+            profile = self.get_clean_user_profile(user_id) or {}
+            strengths = profile.get('strength_topics', [])
+            weaks = profile.get('weak_topics', [])
+            goals = profile.get('learning_goals', '')
+            parts = []
+            if strengths:
+                parts.append(f"强项: {', '.join(strengths)}")
+            if weaks:
+                parts.append(f"弱项: {', '.join(weaks)}")
+            if goals:
+                parts.append(f"学习目标: {goals}")
+            if parts:
+                profile_summary = '\n'.join(parts)
+
+        prompt_parts = ['你是一个专业的编程竞赛辅导助手，服务于一个在线判题系统（OJ）的学生用户。']
+        if profile_summary:
+            prompt_parts.append(f'\n学生画像:\n{profile_summary}')
+        prompt_parts.append(f'\n学生的问题：{message}')
+        prompt_parts.append('\n请给出有帮助的、结构清晰的回答。如果问题与编程无关，可以自由回答。')
+        return '\n'.join(prompt_parts)
+
+    def stream_fallback_llm(self, user_id: int, message: str):
+        """流式版本的通用对话 fallback，yield 文本 chunk。"""
+        from aiChat.utils import ask_deepseek_stream
+        prompt = self._build_fallback_prompt(user_id, message)
+        for chunk in ask_deepseek_stream(prompt):
+            yield chunk
 
     def handle_submission_event(self, user_id: int,
                                   event: Dict[str, Any]) -> Dict[str, Any]:

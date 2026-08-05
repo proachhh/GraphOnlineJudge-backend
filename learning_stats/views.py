@@ -170,3 +170,159 @@ def knowledge_graph_overview(request):
     edges = [{'source': record['source'], 'target': record['target']} for record in edges_result]
 
     return JsonResponse({'nodes': nodes, 'edges': edges})
+
+
+def knowledge_universe(request):
+    """知识宇宙地图：返回增强版图谱数据（节点带题目数/掌握度，边含 PREREQUISITE_OF + RELATED_TO）。
+
+    供前端 echarts graph 力导向图渲染。登录用户会附加每个知识点的掌握度。
+    """
+    user = request.user if request.user.is_authenticated else None
+    username = user.username if user else None
+
+    # 节点：Topic + 关联题目数 + 用户掌握度（AC/总）
+    node_query = """
+    MATCH (t:Topic)
+    OPTIONAL MATCH (t)<-[:BELONGS_TO]-(p:Problem)
+    WITH t, count(DISTINCT p) AS problem_count
+    RETURN t.name AS name, problem_count
+    ORDER BY name
+    LIMIT 500
+    """
+    node_records = neo4j_client.run_query(node_query)
+    nodes = []
+    topic_names = []
+    for r in node_records:
+        name = r['name']
+        if not name:
+            continue
+        topic_names.append(name)
+        nodes.append({
+            'name': name,
+            'problemCount': r['problem_count'],
+            'symbolSize': 15 + min(int(r['problem_count'] or 0), 40),
+        })
+
+    # 边：前置依赖 + 相关关联
+    edges = []
+    pre_query = """
+    MATCH (t1:Topic)-[:PREREQUISITE_OF]->(t2:Topic)
+    WHERE t1.name IN $names AND t2.name IN $names
+    RETURN DISTINCT t1.name AS source, t2.name AS target
+    LIMIT 800
+    """
+    pre_records = neo4j_client.run_query(pre_query, {'names': topic_names})
+    for r in pre_records:
+        edges.append({'source': r['source'], 'target': r['target'], 'type': 'prerequisite'})
+
+    rel_query = """
+    MATCH (t1:Topic)-[:RELATED_TO]-(t2:Topic)
+    WHERE t1.name IN $names AND t2.name IN $names AND elementId(t1) < elementId(t2)
+    RETURN DISTINCT t1.name AS source, t2.name AS target
+    LIMIT 400
+    """
+    try:
+        rel_records = neo4j_client.run_query(rel_query, {'names': topic_names})
+        for r in rel_records:
+            edges.append({'source': r['source'], 'target': r['target'], 'type': 'related'})
+    except Exception:
+        # RELATED_TO 关系可能不存在，忽略
+        pass
+
+    # 登录用户：附加每个知识点的掌握度
+    if username:
+        mastery_query = """
+        MATCH (u:User {username: $username})-[:SUBMITTED]->(s:Submission)-[:FOR]->(p:Problem)-[:BELONGS_TO]->(t:Topic)
+        RETURN t.name AS topic,
+               count(DISTINCT p) AS attempted,
+               count(DISTINCT CASE WHEN s.result = 0 THEN p END) AS ac
+        """
+        try:
+            mastery_records = neo4j_client.run_query(mastery_query, {'username': username})
+            mastery_map = {r['topic']: {'attempted': r['attempted'], 'ac': r['ac']} for r in mastery_records}
+            for node in nodes:
+                m = mastery_map.get(node['name'])
+                if m and m['attempted']:
+                    node['mastery'] = round(m['ac'] / m['attempted'], 2)
+                    node['attempted'] = m['attempted']
+                    node['ac'] = m['ac']
+                else:
+                    node['mastery'] = 0.0
+        except Exception:
+            for node in nodes:
+                node['mastery'] = 0.0
+    else:
+        for node in nodes:
+            node['mastery'] = 0.0
+
+    return JsonResponse({
+        'nodes': nodes,
+        'edges': edges,
+        'meta': {
+            'totalTopics': len(nodes),
+            'totalEdges': len(edges),
+            'isLoggedIn': bool(username),
+        },
+    })
+
+
+def topic_problems(request):
+    """按知识点查询关联题目列表（供学习舱代码练习 tab 使用）。
+
+    通过 Neo4j BELONGS_TO 关系找到 Topic 关联的 Problem，再回查 PostgreSQL 取题目详情。
+    """
+    from problem.models import Problem
+
+    topic = request.GET.get('topic', '').strip()
+    if not topic:
+        return JsonResponse({'problems': [], 'topic': ''})
+
+    query = """
+    MATCH (t:Topic {name: $topic})<-[:BELONGS_TO]-(p:Problem)
+    RETURN DISTINCT p.problem_id AS pid
+    LIMIT 100
+    """
+    try:
+        records = neo4j_client.run_query(query, {'topic': topic})
+    except Exception:
+        records = []
+
+    pids = [r['pid'] for r in records if r.get('pid')]
+    problems = (Problem.objects
+                .filter(id__in=pids, contest__isnull=True, visible=True)
+                .order_by('difficulty', '_id')
+                .values('id', '_id', 'title', 'difficulty'))
+    return JsonResponse({'problems': list(problems), 'topic': topic})
+
+
+def topic_neighbors(request):
+    """查某知识点的前置/后继/关联节点（供学习舱脉络 tab 使用）。"""
+    topic = request.GET.get('topic', '').strip()
+    if not topic:
+        return JsonResponse({'topic': '', 'prerequisites': [], 'successors': [], 'related': []})
+
+    pre_q = """
+    MATCH (t1:Topic)-[:PREREQUISITE_OF]->(t2:Topic {name: $topic})
+    RETURN DISTINCT t1.name AS name
+    """
+    suc_q = """
+    MATCH (t2:Topic {name: $topic})-[:PREREQUISITE_OF]->(t1:Topic)
+    RETURN DISTINCT t1.name AS name
+    """
+    rel_q = """
+    MATCH (t:Topic {name: $topic})-[:RELATED_TO]-(other:Topic)
+    RETURN DISTINCT other.name AS name
+    """
+    try:
+        pre = [r['name'] for r in neo4j_client.run_query(pre_q, {'topic': topic})]
+        suc = [r['name'] for r in neo4j_client.run_query(suc_q, {'topic': topic})]
+        rel = [r['name'] for r in neo4j_client.run_query(rel_q, {'topic': topic})]
+    except Exception:
+        pre, suc, rel = [], [], []
+
+    return JsonResponse({
+        'topic': topic,
+        'prerequisites': pre,
+        'successors': suc,
+        'related': rel,
+    })
