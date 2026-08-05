@@ -87,4 +87,5 @@ cookies*.txt
 #test docker-compose
 docker-compose.yml
 
-paper/
+paperADMA/
+paperACM/
