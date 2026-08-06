@@ -57,7 +57,8 @@ class UserAdminSerializer(serializers.ModelSerializer):
                   "create_time", "last_login", "two_factor_auth", "open_api", "is_disabled"]
 
     def get_real_name(self, obj):
-        return obj.userprofile.real_name
+        profile = getattr(obj, 'userprofile', None)
+        return profile.real_name if profile else ""
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -89,7 +90,7 @@ class EditUserSerializer(serializers.Serializer):
     real_name = serializers.CharField(max_length=32, allow_blank=True, allow_null=True)
     password = serializers.CharField(min_length=6, allow_blank=True, required=False, default=None)
     email = serializers.EmailField(max_length=64)
-    admin_type = serializers.ChoiceField(choices=(AdminType.REGULAR_USER, AdminType.ADMIN, AdminType.SUPER_ADMIN))
+    admin_type = serializers.ChoiceField(choices=(AdminType.REGULAR_USER, AdminType.TEACHER, AdminType.ADMIN, AdminType.SUPER_ADMIN))
     problem_permission = serializers.ChoiceField(choices=(ProblemPermission.NONE, ProblemPermission.OWN,
                                                           ProblemPermission.ALL))
     open_api = serializers.BooleanField()
