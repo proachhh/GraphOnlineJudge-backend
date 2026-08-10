@@ -38,4 +38,6 @@ urlpatterns = [
     re_path(r'^teacher/students/(?P<user_id>\d+)/report/?$', views.teacher_student_report, name='teacher_student_report'),
     re_path(r'^teacher/students/(?P<user_id>\d+)/ai-analysis/?$', views.teacher_student_ai_analysis, name='teacher_student_ai_analysis'),
     re_path(r'^teacher/topics/?$', views.teacher_topic_list, name='teacher_topic_list'),
+    re_path(r'^teacher/stats/?$', views.teacher_stats, name='teacher_stats'),
+    re_path(r'^teacher/code-check/?$', views.teacher_code_check, name='teacher_code_check'),
 ]

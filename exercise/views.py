@@ -2,9 +2,10 @@ import functools
 import json
 import logging
 import re
+import difflib
 
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Avg, Count, Q
 from django.http import JsonResponse, StreamingHttpResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -954,17 +955,24 @@ def teacher_ai_generate_questions(request):
 
     prompt = (
         f"你是编程教学出题专家。请根据知识点【{topic}】，生成{count}道{diff_text}难度的高质量{type_text}。\n\n"
-        f"请严格按以下JSON数组格式返回（不要输出其他内容）：\n"
+        f"重要：所有{count}道题目必须全部是{type_text}，不得混合其他题型。\n\n"
+        f"请严格按以下JSON数组格式返回（不要输出其他内容，不要输出markdown代码块标记）：\n"
     )
     if q_type == 'choice':
         prompt += (
-            '[{"content":"题目内容","choices":[{"key":"A","text":"选项A"},{"key":"B","text":"选项B"},'
-            '{"key":"C","text":"选项C"},{"key":"D","text":"选项D"}],"correct_answer":"A",'
-            '"score":10,"explanation":"解析说明"}]'
+            '每道题必须包含恰好4个选项(A/B/C/D)，correct_answer为单个大写字母。\n'
+            '示例格式：\n'
+            '[{"content":"第1题题干","choices":[{"key":"A","text":"选项A内容"},{"key":"B","text":"选项B内容"},'
+            '{"key":"C","text":"选项C内容"},{"key":"D","text":"选项D内容"}],"correct_answer":"B",'
+            '"score":10,"explanation":"解析说明"},'
+            '{"content":"第2题题干","choices":[...同上...],"correct_answer":"A","score":10,"explanation":"解析说明"}]'
         )
     else:
         prompt += (
-            '[{"content":"题目内容","correct_answer":"参考答案","score":15,"explanation":"解析说明"}]'
+            '每道题不得包含choices字段，correct_answer为文字参考答案。\n'
+            '示例格式：\n'
+            '[{"content":"第1题题干","correct_answer":"参考答案内容","score":15,"explanation":"解析说明"},'
+            '{"content":"第2题题干","correct_answer":"参考答案内容","score":15,"explanation":"解析说明"}]'
         )
 
     full_text = ''
@@ -975,6 +983,9 @@ def teacher_ai_generate_questions(request):
         logger.exception("AI generate questions failed")
         return JsonResponse({'error': f'AI生成失败：{e}'}, status=500)
 
+    # Strip markdown code block markers if present
+    full_text = re.sub(r'```(?:json)?\s*', '', full_text).strip()
+
     match = re.search(r'\[[\s\S]*\]', full_text)
     if not match:
         return JsonResponse({'error': 'AI返回格式错误', 'raw': full_text[:500]}, status=500)
@@ -983,20 +994,46 @@ def teacher_ai_generate_questions(request):
     except json.JSONDecodeError:
         return JsonResponse({'error': 'AI返回JSON解析失败', 'raw': full_text[:500]}, status=500)
 
-    # Normalize question data
-    for q in questions:
-        if 'question_type' not in q:
-            q['question_type'] = q_type
-        if 'choices' not in q:
-            q['choices'] = []
-        if 'score' not in q:
-            q['score'] = 10
+    # Normalize and enforce question type consistency
+    valid_keys = {'A', 'B', 'C', 'D'}
+    normalized = []
+    for idx, q in enumerate(questions):
+        if not isinstance(q, dict) or not q.get('content'):
+            continue
+        q['question_type'] = q_type
+        if 'score' not in q or not q['score']:
+            q['score'] = 10 if q_type == 'choice' else 15
         if 'explanation' not in q:
             q['explanation'] = ''
-        if 'correct_answer' not in q:
-            q['correct_answer'] = ''
         if 'order' not in q:
-            q['order'] = 0
+            q['order'] = idx
+
+        if q_type == 'choice':
+            # Ensure choices is a list of 4 items with keys A/B/C/D
+            choices = q.get('choices') or []
+            choice_map = {}
+            for ch in choices:
+                k = str(ch.get('key', '')).strip().upper()
+                t = ch.get('text', '').strip()
+                if k and t:
+                    choice_map[k] = t
+            q['choices'] = [
+                {'key': k, 'text': choice_map.get(k, f'选项{k}')}
+                for k in ['A', 'B', 'C', 'D']
+            ]
+            # Ensure correct_answer is a single uppercase letter
+            ans = str(q.get('correct_answer', '')).strip().upper()
+            if ans not in valid_keys:
+                ans = 'A'
+            q['correct_answer'] = ans
+        else:
+            # short_answer: remove choices, ensure text answer
+            q.pop('choices', None)
+            if 'correct_answer' not in q or not q['correct_answer']:
+                q['correct_answer'] = ''
+        normalized.append(q)
+
+    questions = normalized
 
     return JsonResponse({'questions': questions})
 
@@ -1322,3 +1359,260 @@ def teacher_topic_list(request):
         logger.exception("neo4j topic query failed")
         return JsonResponse({'error': f'查询知识点失败：{e}', 'topics': []}, status=500)
     return JsonResponse({'topics': topics})
+
+
+@csrf_exempt
+@teacher_required
+def teacher_stats(request):
+    """教师端学情统计聚合接口：汇总指标 + 分布 + 趋势 + Top 学生"""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    from account.models import AdminType
+    from datetime import timedelta
+
+    now = timezone.now()
+    fourteen_days_ago = now - timedelta(days=13)
+
+    # ---- 基础范围：仅统计本教师可见数据（admin 可见全部） ----
+    set_qs = ExerciseSet.objects.all()
+    boss_qs = BossExam.objects.all()
+    if not request.user.is_admin_role():
+        set_qs = set_qs.filter(created_by=request.user)
+        boss_qs = boss_qs.filter(created_by=request.user)
+
+    exercise_subs = ExerciseSubmission.objects.filter(exercise_set__in=set_qs)
+    boss_subs = BossSubmission.objects.filter(exam__in=boss_qs)
+    graded_exercise = exercise_subs.filter(status='graded')
+    graded_boss = boss_subs.filter(status='graded')
+
+    # ---- 汇总指标 ----
+    total_students = User.objects.filter(is_disabled=False).exclude(
+        admin_type=AdminType.SUPER_ADMIN
+    ).count()
+    total_sets = set_qs.count()
+    published_sets = set_qs.filter(is_published=True).count()
+    total_boss = boss_qs.count()
+    total_submissions = exercise_subs.count() + boss_subs.count()
+    graded_submissions = graded_exercise.count() + graded_boss.count()
+
+    all_scores = list(graded_exercise.values_list('total_score', flat=True)) + \
+        list(graded_boss.values_list('total_score', flat=True))
+    all_scores = [s or 0 for s in all_scores]
+    avg_score = round(sum(all_scores) / len(all_scores), 1) if all_scores else 0
+    pass_count = sum(1 for s in all_scores if s >= 60)
+    pass_rate = round(pass_count / len(all_scores) * 100, 1) if all_scores else 0
+
+    summary = {
+        'total_students': total_students,
+        'total_sets': total_sets,
+        'published_sets': published_sets,
+        'total_boss': total_boss,
+        'total_submissions': total_submissions,
+        'graded_submissions': graded_submissions,
+        'avg_score': avg_score,
+        'pass_rate': pass_rate,
+    }
+
+    # ---- 成绩分布 (0-59 / 60-69 / 70-79 / 80-89 / 90-100) ----
+    buckets = {'0-59': 0, '60-69': 0, '70-79': 0, '80-89': 0, '90-100': 0}
+    for s in all_scores:
+        if s >= 90:
+            buckets['90-100'] += 1
+        elif s >= 80:
+            buckets['80-89'] += 1
+        elif s >= 70:
+            buckets['70-79'] += 1
+        elif s >= 60:
+            buckets['60-69'] += 1
+        else:
+            buckets['0-59'] += 1
+    score_distribution = [{'label': k, 'value': v} for k, v in buckets.items()]
+
+    # ---- 知识点分布（题集数 + 平均分） ----
+    topic_agg = set_qs.exclude(topic='').values('topic').annotate(
+        set_count=Count('id', distinct=True),
+        avg_score=Avg('submissions__total_score'),
+    ).order_by('-set_count')[:12]
+    topic_distribution = []
+    for t in topic_agg:
+        topic_distribution.append({
+            'topic': t['topic'] or '未分类',
+            'set_count': t['set_count'],
+            'avg_score': round(t['avg_score'], 1) if t['avg_score'] is not None else 0,
+        })
+
+    # ---- 难度分布 ----
+    diff_agg = set_qs.values('difficulty').annotate(count=Count('id'))
+    diff_map = {d['difficulty'] or 'Mid': d['count'] for d in diff_agg}
+    difficulty_distribution = [
+        {'label': '简单', 'value': diff_map.get('Low', 0), 'key': 'Low'},
+        {'label': '中等', 'value': diff_map.get('Mid', 0), 'key': 'Mid'},
+        {'label': '困难', 'value': diff_map.get('High', 0), 'key': 'High'},
+    ]
+
+    # ---- 提交趋势（近 14 天每日提交数） ----
+    trend_map = {}
+    for i in range(14):
+        d = (fourteen_days_ago + timedelta(days=i)).date()
+        trend_map[d.isoformat()] = 0
+    for sub in list(exercise_subs.filter(create_time__gte=fourteen_days_ago)) + \
+            list(boss_subs.filter(create_time__gte=fourteen_days_ago)):
+        key = sub.create_time.date().isoformat()
+        if key in trend_map:
+            trend_map[key] += 1
+    submission_trend = [{'date': k, 'count': v} for k, v in trend_map.items()]
+
+    # ---- Top 学生（按平均分，至少 1 次已评分提交） ----
+    top_students_qs = User.objects.filter(
+        exercise_submissions__status='graded',
+        exercise_submissions__exercise_set__in=set_qs,
+        is_disabled=False,
+    ).exclude(admin_type=AdminType.SUPER_ADMIN).annotate(
+        sub_count=Count('exercise_submissions', distinct=True),
+        avg_score=Avg('exercise_submissions__total_score'),
+    ).filter(avg_score__isnull=False).order_by('-avg_score')[:5]
+    top_students = []
+    for u in top_students_qs:
+        top_students.append({
+            'id': u.id,
+            'username': u.username,
+            'sub_count': u.sub_count,
+            'avg_score': round(u.avg_score, 1) if u.avg_score is not None else 0,
+        })
+
+    # ---- 近期提交 ----
+    recent = []
+    for s in list(exercise_subs.select_related('user', 'exercise_set').order_by('-create_time')[:8]):
+        recent.append({
+            'id': s.id,
+            'username': s.user.username,
+            'title': s.exercise_set.title,
+            'type': 'exercise',
+            'score': s.total_score,
+            'status': s.status,
+            'created': s.create_time,
+        })
+    for s in list(boss_subs.select_related('user', 'exam').order_by('-create_time')[:8]):
+        recent.append({
+            'id': s.id,
+            'username': s.user.username,
+            'title': s.exam.title,
+            'type': 'boss',
+            'score': s.total_score,
+            'status': s.status,
+            'created': s.create_time,
+        })
+    recent.sort(key=lambda x: x['created'], reverse=True)
+    recent = recent[:8]
+
+    return JsonResponse({
+        'summary': summary,
+        'score_distribution': score_distribution,
+        'topic_distribution': topic_distribution,
+        'difficulty_distribution': difficulty_distribution,
+        'submission_trend': submission_trend,
+        'top_students': top_students,
+        'recent_submissions': recent,
+    })
+
+
+# ===========================================================================
+# Teacher - Code Plagiarism Check
+# ===========================================================================
+
+def _normalize_code(code):
+    """Normalize code for comparison: strip comments, extra whitespace, blank lines."""
+    # Remove single-line comments
+    code = re.sub(r'#.*$', '', code, flags=re.MULTILINE)
+    # Remove multi-line comments
+    code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
+    code = re.sub(r'//.*$', '', code, flags=re.MULTILINE)
+    # Remove string literals (to focus on structure)
+    code = re.sub(r'"[^"]*"', '""', code)
+    code = re.sub(r"'[^']*'", "''", code)
+    # Collapse whitespace
+    lines = []
+    for line in code.split('\n'):
+        line = line.strip()
+        if line:
+            lines.append(line)
+    return '\n'.join(lines)
+
+
+@csrf_exempt
+@teacher_required
+def teacher_code_check(request):
+    """代码查重：对比指定题目所有 AC 提交的代码相似度"""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    problem_id = request.GET.get('problem_id')
+    if not problem_id:
+        return JsonResponse({'error': '请输入题目 ID'}, status=400)
+
+    from submission.models import Submission, JudgeStatus
+    from problem.models import Problem
+
+    # 用户输入的是显示 ID（_id），需转换为数据库内部 ID
+    # 只查公开题（contest 为空），避免竞赛题重复 _id
+    problem = Problem.objects.filter(_id=str(problem_id).strip(), contest__isnull=True).first()
+    if not problem:
+        return JsonResponse({'error': f'题目 {problem_id} 不存在'}, status=404)
+
+    # 获取该题目所有 AC 的提交
+    submissions = list(
+        Submission.objects.filter(
+            problem_id=problem.id,
+            result=JudgeStatus.ACCEPTED
+        ).select_related('problem').order_by('user_id', '-create_time')
+    )
+
+    if len(submissions) < 2:
+        return JsonResponse({'data': [], 'total': 0, 'message': 'AC 提交不足 2 条，无法查重', 'checked': 0})
+
+    # 预处理代码
+    normalized = []
+    for sub in submissions:
+        norm = _normalize_code(sub.code or '')
+        normalized.append({
+            'submission_id': sub.id,
+            'username': sub.username,
+            'user_id': sub.user_id,
+            'language': sub.language,
+            'code': sub.code or '',
+            'normalized': norm,
+            'create_time': sub.create_time.strftime('%Y-%m-%d %H:%M'),
+        })
+
+    # 两两比较（同语言才比较）
+    results = []
+    for i in range(len(normalized)):
+        for j in range(i + 1, len(normalized)):
+            a = normalized[i]
+            b = normalized[j]
+            # 跳过同一用户
+            if a['user_id'] == b['user_id']:
+                continue
+            # 只比较同语言
+            if a['language'] != b['language']:
+                continue
+            ratio = difflib.SequenceMatcher(None, a['normalized'], b['normalized']).ratio()
+            ratio = round(ratio * 100, 1)
+            if ratio >= 60:
+                results.append({
+                    'user_a': a['username'],
+                    'user_b': b['username'],
+                    'user_a_id': a['user_id'],
+                    'user_b_id': b['user_id'],
+                    'submission_a': a['submission_id'],
+                    'submission_b': b['submission_id'],
+                    'language': a['language'],
+                    'similarity': ratio,
+                    'create_time_a': a['create_time'],
+                    'create_time_b': b['create_time'],
+                    'code_a': a['code'],
+                    'code_b': b['code'],
+                })
+
+    results.sort(key=lambda x: x['similarity'], reverse=True)
+    return JsonResponse({'data': results, 'total': len(results), 'checked': len(submissions)})

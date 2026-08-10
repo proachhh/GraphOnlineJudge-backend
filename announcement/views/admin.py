@@ -1,4 +1,4 @@
-from account.decorators import super_admin_required
+from account.decorators import admin_role_required
 from utils.api import APIView, validate_serializer
 
 from announcement.models import Announcement
@@ -8,7 +8,7 @@ from announcement.serializers import (AnnouncementSerializer, CreateAnnouncement
 
 class AnnouncementAdminAPI(APIView):
     @validate_serializer(CreateAnnouncementSerializer)
-    @super_admin_required
+    @admin_role_required
     def post(self, request):
         """
         publish announcement
@@ -21,7 +21,7 @@ class AnnouncementAdminAPI(APIView):
         return self.success(AnnouncementSerializer(announcement).data)
 
     @validate_serializer(EditAnnouncementSerializer)
-    @super_admin_required
+    @admin_role_required
     def put(self, request):
         """
         edit announcement
@@ -38,7 +38,7 @@ class AnnouncementAdminAPI(APIView):
 
         return self.success(AnnouncementSerializer(announcement).data)
 
-    @super_admin_required
+    @admin_role_required
     def get(self, request):
         """
         get announcement list / get one announcement
@@ -55,7 +55,7 @@ class AnnouncementAdminAPI(APIView):
             announcement = announcement.filter(visible=True)
         return self.success(self.paginate_data(request, announcement, AnnouncementSerializer))
 
-    @super_admin_required
+    @admin_role_required
     def delete(self, request):
         if request.GET.get("id"):
             Announcement.objects.filter(id=request.GET["id"]).delete()
