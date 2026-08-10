@@ -1,5 +1,6 @@
 import random
-from django.db.models import Q, Count
+from django.db.models import Q, Count, IntegerField
+from django.db.models.functions import Cast
 from utils.api import APIView
 from account.decorators import check_contest_permission
 from ..models import ProblemTag, Problem, ProblemRuleType
@@ -80,8 +81,10 @@ class ProblemAPI(APIView):
         difficulty = request.GET.get("difficulty")
         if difficulty:
             problems = problems.filter(difficulty=difficulty)
-        # 确保分页时排序一致，避免不同页之间出现数据重复或遗漏
-        problems = problems.order_by('id')
+        # 按 display ID (_id) 数值升序排列
+        problems = problems.annotate(
+            _id_int=Cast('_id', IntegerField())
+        ).order_by('_id_int')
         # 根据profile 为做过的题目添加标记
         data = self.paginate_data(request, problems, ProblemSerializer)
         self._add_problem_status(request, data)

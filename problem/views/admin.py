@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, IntegerField
+from django.db.models.functions import Cast
 from django.http import StreamingHttpResponse, FileResponse
 
 from account.decorators import problem_permission_required, ensure_created_by
@@ -257,10 +258,7 @@ class ProblemBase(APIView):
         if data["rule_type"] == ProblemRuleType.OI:
             total_score = 0
             for item in data["test_case_score"]:
-                if item["score"] <= 0:
-                    return "Invalid score"
-                else:
-                    total_score += item["score"]
+                total_score += item["score"]
             data["total_score"] = total_score
         data["languages"] = list(data["languages"])
 
@@ -311,7 +309,14 @@ class ProblemAPI(ProblemBase):
             except Problem.DoesNotExist:
                 return self.error("Problem does not exist")
 
-        problems = Problem.objects.filter(contest_id__isnull=True).order_by("-create_time")
+        sort = request.GET.get("sort", "id")
+        problems = Problem.objects.filter(contest_id__isnull=True).annotate(
+            _id_int=Cast("_id", IntegerField())
+        )
+        if sort == "create_time":
+            problems = problems.order_by("-create_time")
+        else:
+            problems = problems.order_by("_id_int")
         if rule_type:
             if rule_type not in ProblemRuleType.choices():
                 return self.error("Invalid rule_type")
@@ -447,7 +452,14 @@ class ContestProblemAPI(ProblemBase):
             ensure_created_by(contest, user)
         except Contest.DoesNotExist:
             return self.error("Contest does not exist")
-        problems = Problem.objects.filter(contest=contest).order_by("-create_time")
+        sort = request.GET.get("sort", "id")
+        problems = Problem.objects.filter(contest=contest).annotate(
+            _id_int=Cast("_id", IntegerField())
+        )
+        if sort == "create_time":
+            problems = problems.order_by("-create_time")
+        else:
+            problems = problems.order_by("_id_int")
         if user.is_admin():
             problems = problems.filter(contest__created_by=user)
         keyword = request.GET.get("keyword")

@@ -26,6 +26,7 @@ EOS
 
 COPY ./ /app/
 COPY frontend_dist /app/dist
+COPY mobile_dist /app/dist/mobile
 
 RUN chmod -R u=rwX,go=rX ./ && chmod +x ./deploy/entrypoint.sh
 
