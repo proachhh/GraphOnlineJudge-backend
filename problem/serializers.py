@@ -24,7 +24,7 @@ class CreateSampleSerializer(serializers.Serializer):
 class CreateTestCaseScoreSerializer(serializers.Serializer):
     input_name = serializers.CharField(max_length=32)
     output_name = serializers.CharField(max_length=32)
-    score = serializers.IntegerField(min_value=0)
+    score = serializers.IntegerField(min_value=0, default=0)
 
 
 class CreateProblemCodeTemplateSerializer(serializers.Serializer):

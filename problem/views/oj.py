@@ -80,6 +80,8 @@ class ProblemAPI(APIView):
         difficulty = request.GET.get("difficulty")
         if difficulty:
             problems = problems.filter(difficulty=difficulty)
+        # 确保分页时排序一致，避免不同页之间出现数据重复或遗漏
+        problems = problems.order_by('id')
         # 根据profile 为做过的题目添加标记
         data = self.paginate_data(request, problems, ProblemSerializer)
         self._add_problem_status(request, data)

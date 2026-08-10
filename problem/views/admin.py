@@ -396,8 +396,7 @@ class ContestProblemAPI(ProblemBase):
         except Contest.DoesNotExist:
             return self.error("Contest does not exist")
 
-        if data["rule_type"] != contest.rule_type:
-            return self.error("Invalid rule type")
+        data["rule_type"] = contest.rule_type
 
         _id = data["_id"]
         if not _id:
@@ -467,8 +466,7 @@ class ContestProblemAPI(ProblemBase):
         except Contest.DoesNotExist:
             return self.error("Contest does not exist")
 
-        if data["rule_type"] != contest.rule_type:
-            return self.error("Invalid rule type")
+        data["rule_type"] = contest.rule_type
 
         problem_id = data.pop("id")
 
@@ -1079,7 +1077,7 @@ class ImportLojProblemAPI(APIView, TestCaseZipProcessor):
             test_case_id=test_case_id,
             test_case_score=test_case_score,
             hint=data['hint'] or '',
-            languages=list(SysOptions.language_names.keys()),
+            languages=list(SysOptions.language_names),
             template={},
             created_by=request.user,
             time_limit=data.get('time_limit', 1000),
