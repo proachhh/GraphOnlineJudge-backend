@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q, IntegerField
-from django.db.models.functions import Cast
+from django.db.models import Q, IntegerField, Value
+from django.db.models.functions import Cast, NullIf
 from django.http import StreamingHttpResponse, FileResponse
 
 from account.decorators import problem_permission_required, ensure_created_by
@@ -311,7 +311,7 @@ class ProblemAPI(ProblemBase):
 
         sort = request.GET.get("sort", "id")
         problems = Problem.objects.filter(contest_id__isnull=True).annotate(
-            _id_int=Cast("_id", IntegerField())
+            _id_int=Cast(NullIf("_id", Value("")), IntegerField())
         )
         if sort == "create_time":
             problems = problems.order_by("-create_time")
@@ -454,7 +454,7 @@ class ContestProblemAPI(ProblemBase):
             return self.error("Contest does not exist")
         sort = request.GET.get("sort", "id")
         problems = Problem.objects.filter(contest=contest).annotate(
-            _id_int=Cast("_id", IntegerField())
+            _id_int=Cast(NullIf("_id", Value("")), IntegerField())
         )
         if sort == "create_time":
             problems = problems.order_by("-create_time")
