@@ -219,7 +219,8 @@ class UploadImageAPI(APIView):
         with open(path, "wb") as out:
             for chunk in f.chunks():
                 out.write(chunk)
-        url = f"/public/forum/{name}"
+        # 实际存储位置为 UPLOAD_DIR/forum（/data/public/upload/forum），URL 必须与 Nginx 的 /public -> /data 映射一致
+        url = f"/public/upload/forum/{name}"
         return Response({"success": True, "file_path": url})
 
 

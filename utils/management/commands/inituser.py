@@ -20,7 +20,9 @@ class Command(BaseCommand):
             exit(1)
 
         if action == "create_super_admin":
-            if User.objects.filter(id=1).exists():
+            # 按用户名判断是否已存在：root 的自增 id 可能因历史建删用户而不为 1，
+            # 按 id=1 判断会漏判，导致重复创建触发 username 唯一约束冲突
+            if User.objects.filter(username=username).exists():
                 self.stdout.write(self.style.SUCCESS(f"User {username} exists, operation ignored"))
                 exit()
 
