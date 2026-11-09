@@ -284,7 +284,12 @@ def exercise_start(request, set_id):
         exercise_set=s, user=request.user
     ).exclude(status='in_progress').count()
     if s.max_attempts and completed_count >= s.max_attempts:
-        return JsonResponse({'error': f'已达到最大答题次数({s.max_attempts}次)'}, status=403)
+        # 附带最近一次已完成提交的 id，前端据此直接展示报告而不是空白页
+        last = ExerciseSubmission.objects.filter(
+            exercise_set=s, user=request.user
+        ).exclude(status='in_progress').order_by('-id').first()
+        return JsonResponse({'error': f'已达到最大答题次数({s.max_attempts}次)',
+                             'submission_id': last.id if last else None}, status=403)
     # Reuse an existing in_progress submission or create a new one
     sub = ExerciseSubmission.objects.filter(
         exercise_set=s, user=request.user, status='in_progress'

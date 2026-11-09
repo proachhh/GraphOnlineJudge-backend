@@ -224,6 +224,52 @@ class UploadImageAPI(APIView):
         return Response({"success": True, "file_path": url})
 
 
+class FetchImageAPI(APIView):
+    """转存外链图片到本站，防止第三方防盗链/签名过期导致帖子图片失效"""
+
+    @login_required
+    def post(self, request):
+        import re
+        from urllib.parse import urlparse
+        from urllib.request import urlopen, Request as URLRequest
+
+        url = (request.data.get("url") or "").strip()
+        if not url.startswith(("http://", "https://")):
+            return Response({"success": False, "msg": "invalid url"}, status=status.HTTP_400_BAD_REQUEST)
+        host = (urlparse(url).hostname or "").lower()
+        private = (host == "localhost" or
+                   re.match(r"^127\.", host) or re.match(r"^10\.", host) or
+                   re.match(r"^192\.168\.", host) or re.match(r"^169\.254\.", host) or
+                   re.match(r"^172\.(1[6-9]|2\d|3[01])\.", host))
+        if private:
+            return Response({"success": False, "msg": "invalid host"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            req = URLRequest(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urlopen(req, timeout=10) as resp:
+                ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+                data = resp.read(10 * 1024 * 1024)
+        except Exception:
+            return Response({"success": False, "msg": "fetch failed"}, status=status.HTTP_400_BAD_REQUEST)
+        ext_map = {"image/jpeg": ".jpg", "image/jpg": ".jpg", "image/png": ".png",
+                   "image/gif": ".gif", "image/webp": ".webp"}
+        ext = ext_map.get(ctype)
+        if not ext:
+            if data[:8] == b"\x89PNG\r\n\x1a\n":
+                ext = ".png"
+            elif data[:3] == b"\xff\xd8\xff":
+                ext = ".jpg"
+            elif data[:6] in (b"GIF87a", b"GIF89a"):
+                ext = ".gif"
+        if not ext:
+            return Response({"success": False, "msg": "not an image"}, status=status.HTTP_400_BAD_REQUEST)
+        name = uuid.uuid4().hex[:12] + ext
+        dest = os.path.join(settings.UPLOAD_DIR, "forum")
+        os.makedirs(dest, exist_ok=True)
+        with open(os.path.join(dest, name), "wb") as out:
+            out.write(data)
+        return Response({"success": True, "file_path": f"/public/upload/forum/{name}"})
+
+
 class LikeAPI(APIView):
     @login_required
     def post(self, request):

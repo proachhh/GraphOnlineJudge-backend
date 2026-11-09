@@ -1,6 +1,6 @@
 from django.conf.urls import url
 from .views import (CategoryListAPI, PostListAPI, PostDetailAPI, CommentAPI, CommentListAPI,
-                    UploadImageAPI, LikeAPI, BookmarkAPI, CommentLikeAPI,
+                    UploadImageAPI, FetchImageAPI, LikeAPI, BookmarkAPI, CommentLikeAPI,
                     ReportAPI, AdminReportListAPI, AdminPostListAPI, AdminMuteAPI,
                     MuteStatusAPI)
 
@@ -11,6 +11,7 @@ urlpatterns = [
     url(r"^forum/comments/?$", CommentAPI.as_view(), name="forum_comments"),
     url(r"^forum/comment_list/?$", CommentListAPI.as_view(), name="forum_comment_list"),
     url(r"^forum/upload_image/?$", UploadImageAPI.as_view(), name="forum_upload_image"),
+    url(r"^forum/fetch_image/?$", FetchImageAPI.as_view(), name="forum_fetch_image"),
     url(r"^forum/like/?$", LikeAPI.as_view(), name="forum_like"),
     url(r"^forum/bookmark/?$", BookmarkAPI.as_view(), name="forum_bookmark"),
     url(r"^forum/comment_like/?$", CommentLikeAPI.as_view(), name="forum_comment_like"),
