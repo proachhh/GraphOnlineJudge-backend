@@ -20,17 +20,27 @@ class BasePermissionDecorator(object):
         return JSONResponse.response({"error": "permission-denied", "data": data})
 
     def __call__(self, *args, **kwargs):
-        self.request = args[1]
+        # 兼容两种用法：类视图方法 (self, request) 与函数视图 (request)。
+        # 取第一个带 user 属性的参数作为 request，避免函数视图下 args[1] 越界。
+        request = None
+        for a in args:
+            if hasattr(a, "user"):
+                request = a
+                break
+        if request is None:
+            return self.error("Internal error: request not found")
+        self.request = request
 
         if self.check_permission():
             if self.request.user.is_disabled:
-                return self.error("Your account is disabled")
+                return JSONResponse.response({"error": "permission-denied", "data": "账号已被禁用"})
             return self.func(*args, **kwargs)
         else:
             if not self.request.user.is_authenticated:
-                return self.error("Please login first")
+                # 前端 ajax 拦截器识别 login-required 错误后自动跳转登录页
+                return JSONResponse.response({"error": "login-required", "data": "请先登录"})
             else:
-                return self.error("Permission denied")
+                return JSONResponse.response({"error": "permission-denied", "data": "权限不足"})
 
     def check_permission(self):
         raise NotImplementedError()

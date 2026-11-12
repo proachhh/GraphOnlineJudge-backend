@@ -38,6 +38,10 @@ def agent_chat(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
+    # AI 对话禁止未登录用户调用
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': '请先登录'}, status=401)
+
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
@@ -203,6 +207,10 @@ def agent_recommend(request):
 def agent_chat_stream(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    # AI 流式对话禁止未登录用户调用
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': '请先登录'}, status=401)
 
     try:
         data = json.loads(request.body)

@@ -47,7 +47,7 @@ class UserProfileAPI(APIView):
                 # api返回的是自己的信息，可以返real_name
                 show_real_name = True
         except User.DoesNotExist:
-            return self.error("User does not exist")
+            return self.error("用户不存在")
         return self.success(UserProfileSerializer(user.userprofile, show_real_name=show_real_name).data)
 
     @validate_serializer(EditUserProfileSerializer)
@@ -178,7 +178,7 @@ class UserLoginAPI(APIView):
         # None is returned if username or password is wrong
         if user:
             if user.is_disabled:
-                return self.error("Your account has been disabled")
+                return self.error("该账号已被禁用")
             if not user.two_factor_auth:
                 auth.login(request, user)
                 return self.success("Succeeded")
@@ -191,9 +191,9 @@ class UserLoginAPI(APIView):
                 auth.login(request, user)
                 return self.success("Succeeded")
             else:
-                return self.error("Invalid two factor verification code")
+                return self.error("两步验证码错误")
         else:
-            return self.error("Invalid username or password")
+            return self.error("用户名或密码错误")
 
 
 class UserLogoutAPI(APIView):
@@ -228,18 +228,18 @@ class UserRegisterAPI(APIView):
         User register api
         """
         if not SysOptions.allow_register:
-            return self.error("Register function has been disabled by admin")
+            return self.error("管理员已关闭注册功能")
 
         data = request.data
         data["username"] = data["username"].lower()
         data["email"] = data["email"].lower()
         captcha = Captcha(request)
         if not captcha.check(data["captcha"]):
-            return self.error("Invalid captcha")
+            return self.error("验证码错误")
         if User.objects.filter(username=data["username"]).exists():
-            return self.error("Username already exists")
+            return self.error("用户名已存在")
         if User.objects.filter(email=data["email"]).exists():
-            return self.error("Email already exists")
+            return self.error("邮箱已被注册")
         user = User.objects.create(username=data["username"], email=data["email"])
         user.set_password(data["password"])
         user.save()
@@ -258,7 +258,7 @@ class UserChangeEmailAPI(APIView):
                 if "tfa_code" not in data:
                     return self.error("tfa_required")
                 if not OtpAuth(user.tfa_token).valid_totp(data["tfa_code"]):
-                    return self.error("Invalid two factor verification code")
+                    return self.error("两步验证码错误")
             data["new_email"] = data["new_email"].lower()
             if User.objects.filter(email=data["new_email"]).exists():
                 return self.error("The email is owned by other account")
@@ -284,7 +284,7 @@ class UserChangePasswordAPI(APIView):
                 if "tfa_code" not in data:
                     return self.error("tfa_required")
                 if not OtpAuth(user.tfa_token).valid_totp(data["tfa_code"]):
-                    return self.error("Invalid two factor verification code")
+                    return self.error("两步验证码错误")
             user.set_password(data["new_password"])
             user.save()
             return self.success("Succeeded")
@@ -300,11 +300,11 @@ class ApplyResetPasswordAPI(APIView):
         data = request.data
         captcha = Captcha(request)
         if not captcha.check(data["captcha"]):
-            return self.error("Invalid captcha")
+            return self.error("验证码错误")
         try:
             user = User.objects.get(email__iexact=data["email"])
         except User.DoesNotExist:
-            return self.error("User does not exist")
+            return self.error("用户不存在")
         if user.reset_password_token_expire_time and 0 < int(
                 (user.reset_password_token_expire_time - now()).total_seconds()) < 20 * 60:
             return self.error("You can only reset password once per 20 minutes")
@@ -331,7 +331,7 @@ class ResetPasswordAPI(APIView):
         data = request.data
         captcha = Captcha(request)
         if not captcha.check(data["captcha"]):
-            return self.error("Invalid captcha")
+            return self.error("验证码错误")
         try:
             user = User.objects.get(reset_password_token=data["token"])
         except User.DoesNotExist:
@@ -447,5 +447,5 @@ class SSOAPI(CSRFExemptAPIView):
         try:
             user = User.objects.get(auth_token=request.data["token"])
         except User.DoesNotExist:
-            return self.error("User does not exist")
+            return self.error("用户不存在")
         return self.success({"username": user.username, "avatar": user.userprofile.avatar, "admin_type": user.admin_type})

@@ -1,5 +1,5 @@
 from django.http import JsonResponse
-from django.contrib.auth.decorators import login_required
+from account.decorators import login_required
 from django.db.models import Count, Q, FloatField, F
 from django.db.models.functions import Cast
 from problem.models import ProblemTag

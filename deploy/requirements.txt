@@ -3,6 +3,9 @@ django-cas-ng==5.0.1
 django-dbconn-retry==0.1.7
 django-dramatiq==0.11.6
 django-redis==5.4.0
+# redis-py 6.x 默认改用 RESP3 协议（连接时发送 HELLO 3 握手），
+# 服务器 Redis 版本低于 6.0 不支持该命令，导致 /api/captcha 500，必须锁定 5.x
+redis==5.3.0
 Django==3.2.25
 djangorestframework==3.14.0
 dramatiq==1.16.0

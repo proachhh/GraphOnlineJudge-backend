@@ -23,6 +23,7 @@ def _sse_response(generator):
 
 
 @csrf_exempt
+@login_required
 def chat(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
@@ -43,6 +44,7 @@ def chat(request):
 
 
 @csrf_exempt
+@login_required
 def chat_stream(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
@@ -74,6 +76,7 @@ def chat_stream(request):
 
 
 @csrf_exempt
+@login_required
 def analyze_error(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
@@ -150,6 +153,7 @@ def analyze_error(request):
 
 
 @csrf_exempt
+@login_required
 def analyze_error_stream(request):
     """流式版本的错误分析"""
     if request.method != 'POST':
@@ -220,6 +224,7 @@ def analyze_error_stream(request):
 
 
 @csrf_exempt
+@login_required
 def problem_hint(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
@@ -278,6 +283,7 @@ def problem_hint(request):
 
 
 @csrf_exempt
+@login_required
 def problem_hint_stream(request):
     """流式版本的解题提示"""
     if request.method != 'POST':
@@ -331,6 +337,7 @@ def problem_hint_stream(request):
 
 
 @csrf_exempt
+@login_required
 def learning_advice(request):
     try:
         from submission.models import Submission, JudgeStatus
@@ -425,6 +432,7 @@ def learning_advice(request):
 
 
 @csrf_exempt
+@login_required
 def learning_advice_stream(request):
     """流式版本的学习建议"""
     if request.method != 'POST':
@@ -516,6 +524,7 @@ def learning_advice_stream(request):
 
 
 @csrf_exempt
+@login_required
 def code_review(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
@@ -569,6 +578,7 @@ def code_review(request):
 
 
 @csrf_exempt
+@login_required
 def code_review_stream(request):
     """流式版本的代码审查"""
     if request.method != 'POST':
@@ -619,6 +629,7 @@ def code_review_stream(request):
 
 
 @csrf_exempt
+@login_required
 def visualize_code(request):
     """可视化代码执行：返回逐步执行轨迹"""
     if request.method != 'POST':
@@ -658,6 +669,7 @@ def visualize_code(request):
 
 
 @csrf_exempt
+@login_required
 def code_review_structured(request):
     """AI 代码审查：返回结构化 JSON 报告"""
     if request.method != 'POST':
@@ -744,6 +756,7 @@ def code_review_structured(request):
 
 
 @csrf_exempt
+@login_required
 def topic_summary(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
