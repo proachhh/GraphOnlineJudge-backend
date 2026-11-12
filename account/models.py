@@ -95,6 +95,8 @@ class UserProfile(models.Model):
     oi_problems_status = JSONField(default=dict)
 
     real_name = models.TextField(null=True)
+    # 学号（班级/考试功能使用）
+    student_id = models.TextField(null=True, blank=True)
     avatar = models.TextField(default=f"{settings.AVATAR_URI_PREFIX}/default.png")
     blog = models.URLField(null=True)
     mood = models.TextField(null=True)

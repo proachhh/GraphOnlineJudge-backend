@@ -38,6 +38,7 @@ urlpatterns = [
     url(r"^api/", include("forum.urls")),
     url(r"^api/admin/", include("dashboard.urls")),
     path('api/exercise/', include('exercise.urls')),
+    url(r"^api/school/", include("school.urls")),
     url(r"^public/(?P<path>.*)$", serve, {"document_root": settings.UPLOAD_DIR}),
 ]
 
