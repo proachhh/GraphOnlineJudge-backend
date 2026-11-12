@@ -30,7 +30,7 @@ def chat(request):
     try:
         data = json.loads(request.body)
         user_message = data.get('message', '').strip()
-        model = data.get('model', 'spark')
+        model = data.get('model', 'deepseek')
         if not user_message:
             return JsonResponse({'error': 'message is required'}, status=400)
 
@@ -50,7 +50,7 @@ def chat_stream(request):
     try:
         data = json.loads(request.body)
         user_message = data.get('message', '').strip()
-        model = data.get('model', 'spark')
+        model = data.get('model', 'deepseek')
         if not user_message:
             return JsonResponse({'error': 'message is required'}, status=400)
 
